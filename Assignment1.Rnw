@@ -1,0 +1,31 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Assignment 1: ALDA}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(gridExtra)
+library(tidyr)
+library(sjPlot)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section{First Commit}
+
+<<>>=
+x = c(2,3,4,5)
+print(x)
+@
+\end{document}
