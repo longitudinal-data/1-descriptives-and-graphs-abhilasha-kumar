@@ -248,6 +248,6 @@ cell_withitems$ID = as.factor(as.integer(cell_withitems$ID))
 
 \section {Correlations of DV across Time}
 
-Not sure how to do this. We would need the time metric in wide format for this -- and at this point, we only have the wide format for the item number -- just checking. 
+Not sure how to do this. We would need the time metric in wide format for this -- and at this point, we only have the wide format for the item number -- just checking - jdnakdns.
 
 \end{document}
