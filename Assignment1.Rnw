@@ -238,12 +238,12 @@ library(dplyr)
 library(MASS)
 set.seed(11)
 cell_withitems$ID = as.factor(as.integer(cell_withitems$ID))
-random_sample <- cell_withitems %>%
-  select(ID) %>%
-  distinct %>%
-  sample_n(10)
+#random_sample <- cell_withitems %>%
+ # select(ID) %>%
+  #distinct %>%
+  #sample_n(10)
 
-sample_10 = left_join(random_sample, cell_withitems)
+#sample_10 = left_join(random_sample, cell_withitems)
 @
 
 \section {Correlations of DV across Time}
