@@ -108,23 +108,26 @@ cell_wide = cell_long %>%
 Next, we try to convert this WIDE dataset back to LONG format:
 
 <<>>=
+library(dplyr)
 cell_long2 = cell_wide %>%
   gather(-ID, key = "ItemNo", value = "Accuracy") %>%
   arrange(ID)
-cell_long2
+#cell_long2
 @
 
 Notice that there are some missing values in this dataset -- this is because not all participants have the same number of items, and the spread() function creates all columns for all participants, even if they have missing values. 
 
+A particular challenge I encountered was finding the right metric for long to wide conversion. At this point, I have used the number of items because there is one row corresponding to each item, but this is not a time metric at all. Ideally, 'month' would have been the right time metric, but since I have unequal number of trials in each month, the conversion to wide format is difficult.
+
 \section {Creating the Wave and Date Variable}
 
-We will use the dataset cell_withitems for all future analysis, as it contains all the information. We do not have a "date" variable in our data. As for wave, "Month" could be a reasonable proxy, but we do not have exactly one assessment per month, so it will not make for an appropriate wave variable unless we aggregate the data in some way. 
+We will use the dataset cellwithitems for all future analysis, as it contains all the information. We do not have a "date" variable in our data. As for wave, "Month" could be a reasonable proxy, but we do not have exactly one assessment per month, so it will not make for an appropriate wave variable unless we aggregate the data in some way. 
 
 \section {Graphing the Data}
 In this section, we use different time metrics -- days and months to graph the data. For graphing purposes, we will use the continuous dependent variable, TimeJudgmentDistance, since accuracy is dichotomous. 
 
 \subsection*{Collapsed across Subjects}
-<<>>=
+<<fig=TRUE>>=
 library(ggplot2)
 library(ggthemes)
 
@@ -141,7 +144,7 @@ g1
 
 \subsubsection*{Without Faceting}
 
-<<>>=
+<<fig=TRUE>>=
 g2 <- ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)) + 
   geom_line() +
   aes(color = factor(ID)) + guides(color = FALSE)+
@@ -154,7 +157,7 @@ g2
 
 \subsubsection*{With Faceting}
 
-<<>>=
+<<fig=TRUE>>=
 g3 = ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)) + 
   geom_line(color = "purple") +
   geom_point()+
@@ -170,7 +173,7 @@ g3
 
 First, we look at the average trend line across subjects:
 
-<<>>=
+<<fig=TRUE>>=
 g4 = ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance)) + 
   geom_point(color = "purple") +
     stat_smooth(method = "lm")+
@@ -183,7 +186,7 @@ g4
 
 Then, we create an a trendline for each subject, in the same plot:
 
-<<>>=
+<<fig=TRUE>>=
 g5 = ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)) + 
   geom_point() +
   stat_smooth(method = "lm", se = FALSE)+
@@ -195,7 +198,7 @@ g5 = ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)
 g5
 @
 
-<<>>=
+<<fig=TRUE>>=
 #without colors and individual points: 
 
 g6 = ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)) + 
@@ -209,7 +212,7 @@ g6
 
 What if we also want the overall average trendline in the same plot?
 
-<<>>=
+<<fig=TRUE>>=
 g7 <- g6 + 
   stat_summary(aes(group=1), fun.y = mean)+
   stat_smooth(aes(group =1), method = "lm", color = "red")
@@ -217,7 +220,7 @@ g7
 @
 
 And finally, if we want to look at the average trend line for each subject, along with its datapoints, in separate plots, we can use facetwrap():
-<<>>=
+<<fig=TRUE>>=
 ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)) + 
   geom_line(color = "purple") +
   geom_point()+
@@ -229,10 +232,8 @@ ggplot(cell_withitems, aes(x = Month, y = TimeJudgmentDistance, group = ID)) +
   ggtitle("Distance of Month Estimate as a Function of Month")
 @
 
-Alternatively,
-We may also want to highlight only some of the participants:
 
-<<>>=
+<<echo=FALSE>>=
 library(dplyr)
 library(MASS)
 set.seed(11)
@@ -245,6 +246,8 @@ random_sample <- cell_withitems %>%
 sample_10 = left_join(random_sample, cell_withitems)
 @
 
+\section {Correlations of DV across Time}
 
+Not sure how to do this. We would need the time metric in wide format for this -- and at this point, we only have the wide format for the item number. 
 
 \end{document}
