@@ -1,0 +1,317 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Assignment 2: ALDA}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(gridExtra)
+library(tidyr)
+library(sjPlot)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+We are going to perform the analyses on two datasets: the original email dataset, and a sample dataset that contains resting state data from 91 participants. 
+
+<<>>=
+cell = read.csv("cell_withitems_complete.csv", header = TRUE, sep = ",")
+alda_sample = read.csv("alda_sample.csv", header = TRUE, sep = ",")
+head(cell)
+head(alda_sample)
+@
+
+In the CELL data, the DV is TimeJudgmentDistance, and the IV is Days. The question we're trying to ask is, whether the estimate of the month of the email is farther or closer to the actual month depending on how many days have passed since the email was written. In the resting state data, we will use DMN6 as a dependent variable, and time as the independent variable, and the research question is whether DMN6 increases or decreases as a functon of time.  
+
+\section {Linear Model for All Subjects}
+
+We first run a linear model for all the subjects:
+\subsection*{CELL data}
+
+<<>>=
+library(lme4)
+cell_lm1 = lm(data = cell, TimeJudgmentDistance ~ Days)
+summary(cell_lm1)
+@
+
+The average intercept is 0.6125 and indicates the distance between the actual month and the participant's estimate at day 0, i.e. if the email was sent on the day of the test, the estimate is 0.6125 months off. The average slope is 0.0078, and indicates that for every 1-day change, the distance will increase by 0.0078 months. This is a weak but positive association. 
+
+
+\subsection*{Sample Data}
+<<>>=
+sample_lm1 = lm(data = alda_sample, DMN6 ~ time)
+summary(sample_lm1)
+@
+
+The average intercept is 0.2172 and indicates the value of the DMN6 measure and time 0. The average slope is -0.00037, and indicates that for every 1-year change in time, the value of DMN6 decreases by 0.0003 units. This is a very weak negative association.   
+
+\section {MLM with Random Intercept}
+
+\subsection*{CELL Data}
+
+<<>>=
+cell_mlm1 = lmer(data = cell, TimeJudgmentDistance ~ 1 + (1|ID))
+summary(cell_mlm1)
+@
+
+Note that the intercept-only model only takes into account the differences across subjects. We can also calculate the ICC for this model:
+
+<<>>=
+cell_ICC = 0.1551/(0.1551+7.0646)
+print(cell_ICC)
+@
+
+Below, we compare the residual standard deviation from MLM1 to the residual standard error from the linear model.
+
+<<fig=TRUE>>=
+library(broom)
+library(ggplot2)
+library(ggthemes)
+cell_mlm1_fitted = augment(cell_mlm1, cell)
+cell_lm_fitted = augment(cell_lm1, cell)
+
+cell_residual_plot = matrix(nrow = 2, ncol = 2)
+colnames(cell_residual_plot) = c("Model", "SE_residuals")
+cell_residual_plot = as.data.frame(cell_residual_plot)
+cell_residual_plot$Model = c("Linear Model", "MLM (no intercept)")
+cell_residual_plot$SE_residuals = c(sd(cell_lm_fitted$.resid), sd(cell_mlm1_fitted$.resid))
+
+ggplot(cell_residual_plot, aes(x = Model, y = SE_residuals)) + 
+  geom_bar(fill = "darkgoldenrod", stat = "identity", width = 0.5) +
+  theme_few()+
+  ggtitle("Standard Error of Residuals \n for Linear Model & MLM")
+@
+
+Note that the the residual SE is slightly larger in MLM1 (i.e. the intercept-only model), which means that there is more unexplained variance in the MLM than in the linear model. 
+
+\subsection*{Sample Data}
+<<>>=
+sample_mlm1 = lmer(data = alda_sample, DMN6 ~ 1 + (1|ID))
+summary(sample_mlm1)
+@
+
+The ICC for this model is:
+
+<<>>=
+sample_ICC = 0.005944/(0.005944 + 0.002759) 
+print(sample_ICC)
+@
+
+Below, we compare the residual standard deviation from MLM1 to the residual standard error from the linear model.
+
+<<fig=TRUE>>=
+sample_mlm1_fitted = augment(sample_mlm1, alda_sample)
+sample_lm_fitted = augment(sample_lm1, alda_sample)
+
+sample_residual_plot = matrix(nrow = 2, ncol = 2)
+colnames(sample_residual_plot) = c("Model", "SE_residuals")
+sample_residual_plot = as.data.frame(sample_residual_plot)
+sample_residual_plot$Model = c("Linear Model", "MLM (no intercept)")
+sample_residual_plot$SE_residuals = c(sd(sample_lm_fitted$.resid), sd(sample_mlm1_fitted$.resid))
+
+ggplot(sample_residual_plot, aes(x = Model, y = SE_residuals)) + 
+  geom_bar(fill = "darkgoldenrod", stat = "identity", width = 0.5) +
+  theme_few()+
+  ggtitle("Sample Data: Standard Error of Residuals \n for Linear Model & MLM") 
+@
+
+In this case, the MLM residual standard error is much lower than the SE from the linear model.
+
+\section {Fixed Slope}
+
+\subsection*{CELL Data}
+
+We introduce a fixed slope term for Days in the model:
+<<>>=
+cell_mlm2 = lmer(data = cell, TimeJudgmentDistance ~ Days + (1|ID))
+summary(cell_mlm2)
+@
+
+Now, we have a fixed estimate of the change in TimeJudgmentDistance as a function of Days. This estimate is differnce from the previous estimate because now the regression line that we're fitting also has a slope. The intercept-only model fit parallel lines with slope 0 for each subject. This model fits lines with slope = 0.0078 for each subject. Note that the lines are still parallel, since this effect is fixed. 
+
+The residual standard error is now 6.35, in comparison to 7.06. Thus adding a predictor has reduced the residual standard error, or the unexplained variance in the model. 
+
+Below, we show the fixed effects estimates and the CIs around them using the sjPlot package (we can also use the confint function and manually make the plots):
+
+<<fig=TRUE>>=
+library(sjPlot)
+sjp.lmer(cell_mlm2, type = "fe")
+@
+
+\subsection*{Sample Data}
+<<>>=
+sample_mlm2 = lmer(data = alda_sample, DMN6 ~ time + (1|ID))
+summary(sample_mlm2)
+@
+
+Just as in the previous case, this fixed effect estimate represents the slope of the regression line, and since there is only a fixed term for time and a random intercept for subject, each subject has the same slope but different intercepts i.e. the model produces a set of parallel lines with the slope = -0.00429.
+
+The residual standard error is now 0.0026, and it was 0.0027 earlier. Thus, adding the new predictor has only slightly reduced the error variance. 
+
+Below, we plot the fixed effect:
+
+<<fig=TRUE>>=
+sjp.lmer(sample_mlm2, type = "fe")
+@
+
+\section {Random Slope}
+
+\subsection*{CELL Data}
+We introduce a random slope term for Days in the model:
+<<>>=
+cell_mlm3_1 = lmer(data = cell, TimeJudgmentDistance ~ Days + (Days|ID))
+summary(cell_mlm3_1)
+##model fails to converge. we rescale Days.
+
+cell$zDays = scale(cell$Days, scale = TRUE, center = TRUE)
+
+cell_mlm3_2 = lmer(data = cell, TimeJudgmentDistance ~ zDays + (zDays|ID))
+summary(cell_mlm3_2)
+@
+
+Introducing the random slope term allows each subject to have a different slope and intercept. In comparison to the previous model the residual variance is lower and therefore, we can say that more variance is being explained by this model. Hence, we keep the random slope. We can also compare the two models to see if the second model is a better fit: 
+
+<<>>=
+anova(cell_mlm2, cell_mlm3_2)
+@
+
+This test tells us that the mlm3 fits the data better.
+
+\subsection*{Sample Data}
+<<>>=
+sample_mlm3 = lmer(data = alda_sample, DMN6 ~ time + (time|ID))
+summary(sample_mlm3)
+@
+
+Just as before, the random slope term introduces a slope for each subject. The residual variance now is 0.002135, in comparison to 0.002699, which shows a slight decrease in the unexplained variance. We can also statistically test if this model is a better fit than the previous one:
+
+<<>>=
+anova(sample_mlm2, sample_mlm3)
+@
+
+This shows that the new model is only a marginally better fit than the previous model. Thus, the random slopes do not add a lot, but we will still keep them.
+
+\section {Correlation between Intercept and Slope}
+
+The correlation between the slope and intercept tells us something about how a predictor might influence these variables, and essentially the regression line. For example, if the correlation between the slope and intercept is positive, then the predictor will move both in the same direction. On the other hand, if the slope and intercept have a negative correlation, then they will move in the opposite direction with the increase in the predictor. 
+
+For the CELL data, we see that the correlation between the slope and intercept is positive, i.e. the slope and intercept move in the same direction. For the sample data, the correlation is negative, i.e. the slope and intercept move in opposite directions.  
+
+\section {Density Plot of Random Effects}
+
+Below is the density plot for the random effects:
+
+<<>>=
+library(merTools)
+cell_re.sim = REsim(cell_mlm3_2)
+sample_re.sim = REsim(sample_mlm3)
+
+cell_fe.sim = FEsim(cell_mlm3_2)
+sample_fe.sim = FEsim(sample_mlm3)
+@
+
+\subsection*{CELL data}
+
+<<fig=TRUE>>=
+library(ggplot2)
+cell_g1 <- cell_re.sim %>%
+  filter(term == "(Intercept)")
+
+ggplot(cell_g1, aes(mean)) +
+  geom_density() +
+    theme_few()+
+  ggtitle("CELL: Density Plot for Intercept")
+@
+
+<<fig=TRUE>>=
+cell_g2 <- cell_re.sim %>%
+  filter(term == "zDays")
+
+ggplot(cell_g2, aes(mean)) +
+  geom_density() +
+    theme_few()+
+  ggtitle("CELL: Density Plot for z-Days")
+@
+
+\subsection*{Sample data}
+
+<<fig=TRUE>>=
+library(ggplot2)
+library(ggthemes)
+sample_g1 <- sample_re.sim %>%
+  filter(term == "(Intercept)")
+
+ggplot(sample_g1, aes(mean)) +
+  geom_density() +
+    theme_few()+
+  ggtitle("Sample: Density Plot for Intercept")
+@
+
+<<fig=TRUE>>=
+sample_g2 <- sample_re.sim %>%
+  filter(term == "time")
+
+ggplot(sample_g2, aes(mean)) +
+  geom_density() +
+    theme_few()+
+  ggtitle("Sample: Density Plot for Time")
+@
+
+\section {Caterpillar Plot of Random Effects}
+
+\subsection*{CELL data}
+
+<<fig=TRUE>>=
+cell_p1 = plotREsim(cell_re.sim)
+cell_p1
+@
+
+\subsection*{Sample data}
+
+<<fig=TRUE>>=
+sample_p1 = plotREsim(sample_re.sim)
+sample_p1
+@
+
+\section {Plotting Trajectories}
+\subsection*{CELL data}
+<<fig=TRUE>>=
+library(broom)
+cell_fittedvalues = augment(cell_mlm3_2, cell)
+cell_fittedvalues$ID = as.factor(cell_fittedvalues$ID)
+ggplot(cell_fittedvalues, aes(x = zDays, y = .fitted)) +
+  geom_line(aes(color = ID), show.legend = F, alpha = 0.8 ) +
+  geom_abline(slope = 0.8650, intercept = 1.8538, 
+              color = "red", size = 1)+
+  theme_few()+
+  xlab("z-scored Days") + ylab("Time Judgment Distance") +
+  ggtitle("CELL Data: Plotting Individual Slopes & Trajectory")
+@
+
+\subsection*{Sample data}
+<<fig=TRUE>>=
+library(broom)
+sample_fittedvalues = augment(sample_mlm3, alda_sample)
+sample_fittedvalues$ID = as.factor(sample_fittedvalues$ID)
+ggplot(sample_fittedvalues, aes(x = time, y = .fitted)) +
+  theme_few()+
+  geom_line(aes(color = ID), show.legend = F, alpha = 0.8 ) +
+  geom_abline(slope = -0.005727, intercept = 0.222121, 
+              color = "red", size = 1)+
+  xlab("Time") + ylab("DMN6") +
+  ggtitle("Sample Data: Plotting Individual Slopes & Trajectory")
+
+@
+\end{document}
