@@ -1,0 +1,225 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Assignment 3: ALDA}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(gridExtra)
+library(tidyr)
+library(sjPlot)
+library(lme4)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+We first read a demographics file into our final data frame, so that we can use gender and age as covariates in our analysis. 
+
+<<>>=
+cell_demo = read.csv("cell_demo.csv", header = TRUE, sep = ",")
+cell = read.csv("cell_withitems_complete.csv", header = TRUE, sep = ",")
+
+cell = merge(cell, cell_demo, by = "ID")
+cell$ID = as.factor(as.character(cell$ID))
+@
+
+\section {Time Invariant Nominal Covariate}
+
+We will use Gender as the time-invariant nominal covariate in this analysis. Our DV is TimeJudgmentDistance, and our IV is Days. 
+
+\subsection*{Predicting Only Intercept}
+
+<<>>=
+contrasts(cell$Gender) = contr.treatment(2)
+m1 = lmer(data = cell, TimeJudgmentDistance ~ Days + Gender + (1|ID))
+summary(m1)
+@
+
+\subsection*{Predicting Both Slope and Intercept}
+
+<<>>=
+m2 = lmer(data = cell, TimeJudgmentDistance ~ Days*Gender + (1|ID))
+summary(m2)
+@
+
+\subsection*{Centering}
+
+Since Gender is a nominal variable, it cannot be centered. We could potentially use effects coding instead of dummy coding, but that would not change the overall fit of the model itself, although it. Below, we effects code the Gender variable to see if it affects the model:
+
+<<>>=
+contrasts(cell$Gender) = contr.sum(2)
+m2_effects = lmer(data = cell, TimeJudgmentDistance ~ Days*Gender + (1|ID))
+summary(m2_effects)
+@
+
+Notice that the interpretation of the coefficients changes, in that earlier the intercept was the value for the dummy coded Gender variable (0 : female), but now the intercept is the value of TimeJudgmentDistance at an average value of gender. Similarly, the Days coefficient is the increase in TimeJudgmentDistance, for an average value of gender. 
+
+To know whether the model with intercept-only or both slope and intercept fits the data better, we run an ANOVA:
+
+<<>>=
+anova(m1,m2)
+@
+
+Thus, the model in which Gender predicts both slope and intercept explains more of the variance, and it is thus our final model. 
+
+\section {Time Invariant Continuous Covariate}
+
+\subsection*{Predicting Only Intercept}
+
+<<>>=
+m3 = lmer(data = cell, TimeJudgmentDistance ~ Days + Age + (1|ID))
+summary(m3)
+@
+
+\subsection*{Predicting Both Slope and Intercept}
+
+<<>>=
+m4 = lmer(data = cell, TimeJudgmentDistance ~ Days*Age + (1|ID))
+summary(m4)
+@
+
+We compare Models 3 and 4 to see whether the interaction term explains any more of the variance:
+
+<<>>=
+anova(m3, m4)
+@
+
+Since Model 4 is not significantly different from Model 3, we will pick Model 3 as our final model. 
+
+\subsection*{Centering}
+
+Now, we center the Age and Days variable. 
+<<>>=
+cell$Age.c = scale(cell$Age, center = TRUE, scale = FALSE)
+cell$Days.c = scale(cell$Days, center = TRUE, scale = FALSE)
+
+m5 = lmer(data = cell, TimeJudgmentDistance ~ Days.c*Age.c + (1|ID))
+summary(m5)
+@
+
+\section {Graphing the Final Models}
+
+\subsection*{Nominal Covariate}
+
+<<fig=TRUE>>=
+library(broom)
+cell_nominal = augment(m2, cell)
+
+ggplot(cell_nominal, aes(x = Days, y = .fitted)) + 
+  geom_smooth(method = "lm", aes(color = Gender)) +
+  xlab("Days") + ylab("Time Judgment Distance") +
+  theme_few()+
+  ggtitle("Gender Predicting Slopes and Intercepts")
+@
+
+\subsection*{Continuous Covariate}
+
+<<fig=TRUE>>=
+library(broom)
+cell_categorical = augment(m3, cell)
+
+ggplot(cell_categorical, aes(x = Days, y = .fitted)) + 
+  geom_smooth(method = "lm", aes(group = ID, color = Age)) +
+  xlab("Days") + ylab("Time Judgment Distance") +
+  theme_few()+
+  ggtitle("Age Predicting Slopes and Intercepts")
+@
+
+\section {Calculating Confidence Intervals}
+We have Model 2 for the nominal covariate, and Model 3 for the categorical covariate. To calculate confidence intervals for our effects, we use the following equation:
+
+\begin{equation}
+\gamma_{00} \pm 1.96*(\tau_{U_{0j}})
+\end{equation}
+
+\subsection*{Nominal Covariate}
+
+First for the intercept:
+<<>>=
+0.48226 + (1.96*0.4248)
+0.48226 - (1.96*0.4248)
+@
+
+Then the slope:
+<<>>=
+## For days
+0.009601 + (1.96*0.4248)
+0.009601 - (1.96*0.4248)
+
+## For gender
+
+0.290974 + (1.96*0.4248)
+0.290974 - (1.96*0.4248)
+@
+
+Another way to visualize these confidence intervals is using the sjPlot function:
+
+<<fig=TRUE>>=
+sjp.lmer(m2, type = "fe")
+@
+
+\subsection*{Continuous Covariate}
+
+First for the intercept:
+
+<<>>=
+0.8613109 + (1.96*0.4422)
+0.8613109 - (1.96*0.4422)
+@
+
+Then for the slope:
+
+<<fig=TRUE>>=
+## For days:
+0.0078423 + (1.96*0.4422)
+0.0078423 - (1.96*0.4422)
+
+## For age
+-0.0089452 + (1.96*0.4422)
+-0.0089452 - (1.96*0.4422)
+
+sjp.lmer(m3, type = "fe")
+@
+
+\section {Both Covariates}
+
+<<>>=
+m6 = lmer(data = cell, TimeJudgmentDistance ~ Days*Gender + Age + (1|ID))
+summary(m6)
+@
+
+The interpretation of parameters when both covariates are in the model changes, because the coefficients are now at constant values of the other covariate. For example, in Model 6:
+
+The intercept is the value of TimeJudgmentDistance for females, at age = 0. Note that is this meaningless at this point, because our age variable is not centered. 
+
+Similarly, the Gender2 coefficient is the difference in TimeJudgmentDistance between males and females at age=0.
+
+The Age coefficient is the decrease in TimeJudgmentDistance for every 1-unit increase in Age, for females (dummy coded 0)
+
+The interaction term denotes the difference in slopes between males and females, at age = 0. 
+
+\section {Time Varying Covariate}
+
+Suppose we wanted to covary out the number of messages sent to the person -- this is a time-varying covariate in our data. 
+
+<<>>=
+cell$Messages.c = scale(cell$Messages, center = TRUE, scale = FALSE)
+m7 = lmer(data = cell, TimeJudgmentDistance ~ Days.c*Messages.c + (1|ID))
+summary(m7)
+@
+
+We still get a rescaling warning, and so we may want to consider scaling i.e. z-scoring the variables. That might make the most sense for these models. 
+
+\end{document}
