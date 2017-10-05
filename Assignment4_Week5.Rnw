@@ -1,0 +1,246 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+header-includes:
+- \usepackage{booktabs}
+- \usepackage{longtable}
+- \usepackage{array}
+- \usepackage{multirow}
+- \usepackage[table]{xcolor}
+- \usepackage{wrapfig}
+- \usepackage{float}
+- \usepackage{colortbl}
+- \usepackage{pdflscape}
+- \usepackage{tabu}
+- \usepackage{threeparttable}
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Assignment 3: ALDA}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+library(sjPlot)
+library(lme4)
+library(plyr)
+library(dplyr)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+We first read a demographics file into our final data frame, so that we can use gender and age as covariates in our analysis. 
+
+<<>>=
+cell_demo = read.csv("cell_demo.csv", header = TRUE, sep = ",")
+cell = read.csv("cell_withitems_complete.csv", header = TRUE, sep = ",")
+
+cell = merge(cell, cell_demo, by = "ID")
+cell$ID = as.factor(as.character(cell$ID))
+library(plyr)
+library(dplyr)
+cell = cell %>% filter(cell$Messages <= 50)
+@
+
+\section {Regression Model}
+
+We first run a model with DV as TimeJudgmentDistance, and IV as Days, and Vividness as a continuous covariate. We will incorporate a random slope for Days in our model.  
+
+<<>>=
+library(lme4)
+cell$Days.z  = as.numeric(scale(cell$Days, scale = TRUE, center = TRUE))
+
+model = lmer(data = cell, TimeJudgmentDistance ~ Days.z*Vividness + (Days.z|ID))
+summary(model)
+@
+
+\section {Making a Regression Output Table}
+
+<<echo=FALSE>>=
+library(MuMIn)
+library(tibble)
+library(plyr)
+library(dplyr)
+
+## fixed effects first ##
+table_fun <- function(model){
+  fixed <- broom::tidy(model) %>% filter(group == "fixed") %>%
+    select(term, estimate) 
+  ## add random effects ##
+  rand <- broom::tidy(model) %>% filter(group != "fixed") %>%
+    select(term, estimate)
+  ## get confidence intervals ##
+  CI <- data.frame(confint.merMod(model, method = "boot", nsim = 10)) %>%
+    mutate(term = rownames(.)) %>% setNames(c("lower", "upper", "term"))
+  
+  ## Get ICC & R2 values ##
+  ICC <- reghelper::ICC(model)
+  R2 <- MuMIn::r.squaredGLMM(model)
+  
+  ## format the fixed effects
+  fixed <- fixed %>% left_join(CI %>% filter(!grepl(".sig", term))) %>%
+    mutate(type = "Fixed Parts")
+  
+  rand <- rand %>%
+    mutate(estimate = ifelse(grepl("cor", term) == T, estimate, estimate^2),
+          term = mapvalues(term, unique(term), 
+           c("$\\tau_{00}$", "$\\tau_{11}$", "$\\tau_{10}$", "$\\hat{\\sigma^2}$"))) %>%
+    left_join(
+      CI %>% filter(grepl(".sig", term)) %>%
+        mutate(term = mapvalues(term, unique(term), 
+            c("$\\tau_{00}$", "$\\tau_{10}$", "$\\tau_{11}$", "$\\hat{\\sigma^2}$")),
+            lower = lower^2, upper = upper^2)) %>%
+    mutate(type = "Random Parts")
+  
+  mod_terms <- tribble(
+    ~term, ~estimate, ~type,
+    "ICC", ICC, "Model Terms",
+    "$R^2_m$", R2[1], "Model Terms",
+    "$R^2_c$", R2[2], "Model Terms"
+  )
+  
+  tab <- fixed %>%
+    full_join(rand) %>%
+    mutate(CI = sprintf("(%.2f, %.2f)", lower, upper)) %>%
+    select(-lower, -upper) %>%
+    full_join(mod_terms) %>%
+    mutate(estimate = sprintf("%.2f", estimate)) %>%
+    dplyr::rename(b = estimate) %>%
+    select(type, everything())
+  return(tab)
+}
+# you can use this with papaja and the apa_table function pretty easily
+# the trick is that if you are not using the papaja template, the proper
+# LaTeX packages may not be loaded. You can get around this by attaching
+# a .tex file calling the packages under "in_header: header.tex" in your YAML
+# header the YAML header of this .Rmd file contains the necessary syntax and 
+# the header.tex file with the proper packages
+
+tab <- table_fun(model)
+@
+
+\subsection*{Using xtable()}
+
+<<xtable, results=tex, echo=FALSE>>=
+xtable(tab)
+@
+
+\subsection*{Using kable() and kableExtra()}
+
+<<results=tex, echo=FALSE>>=
+library(knitr)
+library(kableExtra)
+options(knitr.table.format = "latex")
+options(knitr.kable.NA = '')
+knitr::kable(tab %>% #select(-type) %>%
+    mutate(term = gsub("[()]", "", term)),
+             caption = "Regression Output", 
+    format = "latex", 
+    #longtable = T, 
+    booktabs = T, escape = F) %>%
+   #group_rows("Fixed", 1,4) %>% 
+   #group_rows("Random", 5,9) %>%
+   #group_rows("Model", 9,11) %>%
+  collapse_rows(1) %>%
+  #kable_styling(latex_options = c("striped","repeat_header"),full_width = F)%>%
+  add_header_above(c(" ", " ", "Model 1" = 2))
+@
+
+
+\subsection*{Using papaja}
+
+<<results=tex, echo=FALSE>>=
+library(papaja)
+
+papaja::apa_table(tab %>% select(-type),caption = "papaja MLM Table Example", 
+    na_string = "", stub_indents = list(Fixed = c(1:4), Random = c(5:8), Summary = c(9:11)),
+    col_spanners = list(`TimeJudgmentDistance` = c(2,3)))
+@
+
+\section {Plotting}
+
+\section*{Plotting Continuous Covariate: Matrix Multiplication}
+
+\subsection*{Using matrix multiplication}
+
+<<fig=TRUE, echo=FALSE>>=
+fixed.frame <- cell %>% select(Vividness) %>%
+  dplyr::summarise(mean = mean(Vividness, na.rm = T), 
+            sd = sd(Vividness, na.rm = T))
+
+fixed.frame <-
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      Days.z = seq(0,2,.1),
+      Vividness = c(fixed.frame$mean-fixed.frame$sd,
+                     fixed.frame$mean,
+                     fixed.frame$mean+fixed.frame$sd))) %>%
+  # now take care of9 interactions and add an intercept
+  mutate(`Days.z:Vividness` = as.vector(Days.z*Vividness),
+         Intercept = 1) %>%
+  # reordering everything
+  select(Intercept, everything())
+
+# multiplying to get values for model frame
+fixed.frame$value <- as.vector(as.matrix(fixed.frame) %*% fixef(model))
+library(ggplot2)
+library(ggthemes)
+fixed.frame %>%
+  mutate(VividnessLevel = factor(Vividness, levels = unique(Vividness),
+                                 labels = c("-1SD", "0SD", "1SD")), Days = Days.z) %>%
+  ggplot(aes(x = Days, y = value, color = VividnessLevel)) +
+    geom_line(size = 1) +
+       theme_few() +
+   labs(x = "Days", y = "Time Estimate") +
+  ggtitle("TimeEstimate as a function of \nDays and Vividness") +
+  theme(axis.text = element_text(face = "bold", size = rel(1.2)),
+          axis.title = element_text(face = "bold", size = rel(1.2)),
+          legend.title = element_text(face = "bold", size = rel(1.2)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+@
+
+\subsection*{Using predict() function}
+
+<<fig=TRUE, echo=FALSE>>=
+fixed.frame <- cell %>%
+  summarise(mean = mean(Vividness, na.rm = T), 
+            sd = sd(Vividness, na.rm = T))
+
+fixed.frame <- 
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      Days.z = seq(0,2,.1), 
+      Vividness = c(fixed.frame$mean-fixed.frame$sd,
+                     fixed.frame$mean,
+                     fixed.frame$mean+fixed.frame$sd))) %>%
+    mutate(pred = predict(model, newdata = ., re.form = NA))
+
+
+library(ggplot2)
+library(ggthemes)
+fixed.frame %>%
+  mutate(VividnessLevel = factor(Vividness, levels = unique(Vividness), 
+                                 labels = c("-1SD", "0SD", "1SD"))) %>%
+  ggplot(aes(x = Days.z, y = pred, color = VividnessLevel)) +
+    geom_line(size = 1) + 
+       theme_few() +
+   labs(x = "Days", y = "Time Estimate") + 
+  ggtitle("TimeEstimate as a function of \n Days and Vividness") +
+  theme(axis.text = element_text(face = "bold", size = rel(1.2)),
+          axis.title = element_text(face = "bold", size = rel(1.2)),
+          legend.title = element_text(face = "bold", size = rel(1.2)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+@
+
+
+\end{document}
