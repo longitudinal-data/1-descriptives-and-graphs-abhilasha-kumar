@@ -1,0 +1,531 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Intensive Data Analysis II}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+library(sjPlot)
+library(lme4)
+library(plyr)
+library(dplyr)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+<<>>=
+cell_demo = read.csv("cell_demo.csv", header = TRUE, sep = ",")
+cell = read.csv("cell_withitems_complete.csv", header = TRUE, sep = ",")
+
+cell = merge(cell, cell_demo, by = "ID")
+cell$ID = as.factor(as.character(cell$ID))
+@
+
+\section {Eyeballing the Data}
+
+\subsection*{Accuracy for Name Retrieval}
+
+First, we get an average accuracy estimate for each month, per subject to visually examine the data:
+<<echo=FALSE, fig=TRUE>>=
+library(plyr)
+library(dplyr)
+
+accuracy_agg = group_by(cell, ID, Month) %>%
+    summarise_at(vars(Accuracy), mean)
+
+library(ggplot2)
+library(ggthemes)
+ggplot(accuracy_agg, aes(x = Month, y = Accuracy)) +
+  geom_smooth(method = "lm", se = FALSE, 
+             size = 0.8) + 
+        aes(color = factor(ID)) + guides(color = FALSE)+
+       theme_few() +
+    xlab("Month Since Email") + ylab("Mean Accuracy") + 
+  ggtitle("Name Retrieval Accuracy Across Time") +
+    theme(plot.title = element_text(hjust = 0.5))
+@
+
+We also look at this at the subject level:
+
+<<echo=FALSE, fig=TRUE>>=
+ggplot(accuracy_agg, aes(x = Month, y = Accuracy, group = ID)) +
+        geom_point() +  geom_line(color = "purple") +
+       theme_few() +
+         facet_wrap(~ID) + 
+    xlab("Month Since Email") + ylab("Mean Accuracy") + 
+  ggtitle("Name Retrieval Accuracy Across Time") +
+      theme(plot.title = element_text(hjust = 0.5))
+@
+
+\subsection*{Distance of Temporal Estimate}
+
+<<fig=TRUE, echo=FALSE>>=
+ggplot(cell, aes(x = Month, y = TimeJudgmentDistance)) +
+    geom_smooth(method = "lm", se = FALSE, 
+                size = 0.8) + 
+        aes(color = factor(ID)) + guides(color = FALSE)+
+       theme_few() +
+    xlab("Month Since Email") + 
+  ylab("Distance between Actual annd Guessed Month") + 
+  ggtitle("Precision of Temporal Estimate Across Time") +
+    theme(plot.title = element_text(hjust = 0.5))
+@
+
+<<echo=FALSE, fig=TRUE>>=
+ggplot(cell, aes(x = Month, y = TimeJudgmentDistance, group = ID)) +
+        geom_point() +  geom_line(color = "purple") +
+       theme_few() +
+         facet_wrap(~ID) + 
+    xlab("Month Since Email") + ylab("Mean Accuracy") + 
+  ggtitle("Precision of Temporal Estimate Across Time") +
+      theme(plot.title = element_text(hjust = 0.5))
+@
+
+\section {Model 1: Fixed Slope of Time}
+
+\subsection*{Name Retrieval Accuracy}
+<<>>=
+library(lme4)
+acc_model_1 = glmer(data = cell, Accuracy ~ Month + (1|ID), family = "binomial")
+summary(acc_model_1)
+@
+
+Here, the coefficient b1 for Month, is the predicted change in the logit for a 1-unit change in Month. Thus, these are the odds that Accuracy changes by exp (b1) for a 1-unit change in Month. We can also convert odds to probabilities: 
+<<>>=
+odds = exp(-0.16585)
+prob = odds/(1+odds)
+prob
+@
+
+Thus, for every 1-unit change in Month, the odds of Accuracy decrease by 16 percent, and the accuracy changes by 0.45.
+
+We can also look at the ICC for this model:
+
+<<>>=
+reghelper::ICC(acc_model_1) ## why is this 1?
+@
+
+\subsection*{Temporal Distance}
+<<>>=
+time_model_1 = lmer(data = cell, TimeJudgmentDistance ~ Month + (1|ID))
+summary(time_model_1)
+@
+
+We see a main effect of Month, for every 1-unit change in Month, the temporal distance increase by 0.24 units. 
+
+<<>>=
+reghelper::ICC(time_model_1)
+@
+
+\section {Model 2: Adding Random Slope for Time}
+
+\subsection*{Name Retrieval Accuracy}
+<<>>=
+library(lme4)
+acc_model_2 = glmer(data = cell, Accuracy ~ Month + (Month|ID), family = "binomial")
+summary(acc_model_2)
+
+anova(acc_model_1, acc_model_2)
+
+## model with random slope is NOT better
+@
+
+\subsection*{Temporal Distance}
+<<>>=
+# time_model_2 = lmer(data = cell, TimeJudgmentDistance ~ Month + (Month|ID))
+# summary(time_model_2)
+## does not converge! 
+@
+
+\section {Model 3: Examining Polynomial Trend}
+
+\subsection*{Name Retrieval Accuracy}
+
+<<>>=
+cell$Month.c = as.numeric(scale(cell$Month, center = TRUE, scale = FALSE))
+#acc_model_3 = glmer(data = cell, Accuracy ~ Month.c + I((Month.c)^2) (1|ID), family = "binomial")
+#summary(acc_model_3)
+
+## not sure
+@
+
+\subsection*{Temporal Distance}
+<<>>=
+time_model_3 = lmer(data = cell, TimeJudgmentDistance ~ Month.c + I((Month.c)^2) + (1|ID))
+summary(time_model_3)
+# quadratic term not significant!
+@
+
+\section {Centering the Data}
+
+\subsection*{Centering Time}
+
+We first make the 0 for the time variable (Month) meaningful, and see if any of the models change before we add any new predictors. 
+
+<<>>=
+## make the 0 for month meaningful
+cell$Month_0 = cell$Month - 1
+acc_model_4 = glmer(data = cell, Accuracy ~ Month_0 + (1|ID), family = "binomial")
+summary(acc_model_4)
+
+## model with random slope of Month_0 does not converge. acc_model_4 is the final model.
+
+time_model_4 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + (1|ID))
+summary(time_model_4)
+
+time_model_5 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + (Month_0|ID))
+summary(time_model_5)
+
+anova(time_model_4, time_model_5)
+##model 5 with random slope is better. 
+@
+
+\subsection {Adding New Predictors}
+
+We have 2 predictors that could potentially influence our DVs. The number of messages sent to the recipient over the year (a level-1 predictor), and the vividness for the email conversation (level 1 predictor). We will now try to include these variables. 
+
+\subsubsection*{Uncentered Messages}
+
+<<>>=
+acc_pred_1  = glmer(data = cell, Accuracy ~ Month_0 + Messages + (1|ID), family = "binomial")
+summary(acc_pred_1)
+anova(acc_model_4, acc_pred_1) ## this is a better model
+
+time_pred_1 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + Messages + (Month_0|ID))
+summary(time_pred_1)
+anova(time_model_5, time_pred_1) ## not a better model
+@
+
+\subsubsection*{Uncentered Vividness}
+
+<<>>=
+# acc_pred_2  = glmer(data = cell, Accuracy ~ Month_0 + Vividness + (1|ID), family = "binomial")
+# summary(acc_pred_2) ## does not converge
+# 
+# time_pred_2 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + Vividness + (Month_0|ID))
+# summary(time_pred_2) ## does not converge
+@
+
+\subsubsection*{Within-Person and Grand Mean Centering}
+
+<<>>=
+library(dplyr)
+
+## aggregate per subject all IVs and DVs
+cell_agg = cell %>% group_by(ID) %>%
+  summarize(acc_mean = mean(Accuracy, na.rm = TRUE),
+            time_mean = mean(TimeJudgmentDistance, na.rm = TRUE),
+            messages_mean = mean(Messages, na.rm = TRUE),
+            vividness_mean = mean(Vividness, na.rm = TRUE))
+
+head(cell_agg)
+
+## merge aggregate info with long data
+cell = merge(cell, cell_agg, by = "ID", all.x = T)
+
+## person and grand-mean centered scores using original and aggregate
+library(dplyr)
+cell = cell %>% mutate(acc_pc = Accuracy - acc_mean,
+                 time_pc = TimeJudgmentDistance - time_mean,
+                 messages_pc = Messages - messages_mean,
+                 vividness_pc = Vividness - vividness_mean)
+@
+
+\section {Centered Multiple Predictors}
+
+\subsection*{Time and Messages}
+
+<<>>=
+acc_pred_3 = glmer(data = cell, Accuracy ~ Month_0 + messages_mean +
+                                                messages_pc + (1|ID), family = "binomial")
+summary(acc_pred_3)
+
+## Accuracy increases if the number of sent messages is over and above the person's sending
+## behaviour in general. IMPORTANT!
+
+time_pred_3 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + messages_mean +
+                                                messages_pc + (Month_0|ID))
+summary(time_pred_3) 
+
+## Still no effect of messages
+@
+
+\subsection*{Time and Vividness}
+
+<<>>=
+# acc_pred_4 = glmer(data = cell, Accuracy ~ Month_0 + vividness_mean +
+#                                                 vividness_pc + (1|ID), family = "binomial")
+# summary(acc_pred_4) ## does not converge
+# 
+# time_pred_4 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + vividness_mean +
+#                                                 vividness_pc + (Month_0|ID))
+# summary(time_pred_4) ## does not converge
+@
+
+\subsection*{Time and Messages Interaction}
+
+<<>>=
+# acc_pred_5 = glmer(data = cell, Accuracy ~ Month_0 + messages_mean +
+#                                                 messages_pc + Month_0*messages_pc +
+#                                                     (1|ID), family = "binomial")
+# summary(acc_pred_5) ## does not converge
+
+# time_pred_5 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + messages_mean +
+#                                                 messages_pc + Month_0*messages_pc +
+#                                                            (Month_0|ID))
+# summary(time_pred_5) ## no effect
+
+@
+
+\section {Graphing the Models}
+
+\subsection*{Naming Accuracy}
+
+<<>>=
+sjPlot::sjp.glmer(acc_pred_3, type = "eff", vars = c("Month_0", "messages_pc"))
+@
+
+The final model for accuracy is acc_pred_3, with time and messages. We are going to try and plot the fitted values from this model below:
+<<echo=FALSE, fig=TRUE>>=
+fixed.frame <- cell %>%
+  summarise(mean_pc = mean(messages_pc, na.rm = T), 
+            sd_pc = sd(messages_pc, na.rm = T),
+            mean_grand = mean(messages_mean, na.rm = T),
+            sd_grand = sd(messages_mean, na.rm =T))
+
+fixed.frame <- 
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      Month_0 = seq(0,11,1), 
+      messages_pc = c(fixed.frame$mean_pc-fixed.frame$sd_pc,
+                     fixed.frame$mean_pc,
+                     fixed.frame$mean_pc+fixed.frame$sd_pc)),
+      messages_mean = c(fixed.frame$mean_grand-fixed.frame$sd_grand,
+                     fixed.frame$mean_grand,
+                     fixed.frame$mean_grand+fixed.frame$sd_grand) ) %>%
+    mutate(pred = predict(acc_pred_3, newdata = ., re.form = NA)) ## geting an error here
+
+
+library(ggplot2)
+library(ggthemes)
+fixed.frame %>%
+  mutate(MessageLevel = factor(messages_pc, levels = unique(messages_pc), 
+                                 labels = c("-1SD", "0SD", "1SD"))) %>%
+  ggplot(aes(x = Month_0, y = pred, color = MessageLevel)) +
+    geom_smooth(method = "loess") + 
+       theme_few() +
+   labs(x = "Month", y = "Naming Accuracy") + 
+  ggtitle("Naming Accuracy as a function of \n Month and Messages") +
+  theme(axis.text = element_text(face = "bold", size = rel(1)),
+          axis.title = element_text(face = "bold", size = rel(1)),
+          legend.title = element_text(face = "bold", size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1), hjust = .5))
+@
+
+\section {Regression Table} 
+
+\subsection*{Storing Table into a Dataframe}
+
+<<echo=FALSE>>=
+# library(MuMIn)
+# library(tibble)
+# library(plyr)
+# library(dplyr)
+# 
+# ## fixed effects first ##
+# table_fun <- function(model){
+#   fixed <- broom::tidy(model) %>% filter(group == "fixed") %>%
+#     select(term, estimate) 
+#   ## add random effects ##
+#   rand <- broom::tidy(model) %>% filter(group != "fixed") %>%
+#     select(term, estimate)
+#   ## get confidence intervals ##
+#   CI <- data.frame(confint.merMod(model, method = "boot", nsim = 10)) %>%
+#     mutate(term = rownames(.)) %>% setNames(c("lower", "upper", "term"))
+#   
+#   ## Get ICC & R2 values ##
+#   ICC <- reghelper::ICC(model)
+#   R2 <- MuMIn::r.squaredGLMM(model)
+#   
+#   ## format the fixed effects
+#   fixed <- fixed %>% left_join(CI %>% filter(!grepl(".sig", term))) %>%
+#     mutate(type = "Fixed Parts")
+#   
+#   rand <- rand %>%
+#     mutate(estimate = ifelse(grepl("cor", term) == T, estimate, estimate^2),
+#           term = mapvalues(term, unique(term), 
+#            c("$\\tau_{00}$"))) %>%
+#     left_join(
+#       CI %>% filter(grepl(".sig", term)) %>%
+#         mutate(term = mapvalues(term, unique(term), 
+#             c("$\\tau_{00}$")),
+#             lower = lower^2, upper = upper^2)) %>%
+#     mutate(type = "Random Parts")
+#   
+#   mod_terms <- tribble(
+#     ~term, ~estimate, ~type,
+#     "ICC", ICC, "Model Terms",
+#     "$R^2_m$", R2[1], "Model Terms",
+#     "$R^2_c$", R2[2], "Model Terms"
+#   )
+#   
+#   tab <- fixed %>%
+#     full_join(rand) %>%
+#     mutate(CI = sprintf("(%.2f, %.2f)", lower, upper)) %>%
+#     select(-lower, -upper) %>%
+#     full_join(mod_terms) %>%
+#     mutate(estimate = sprintf("%.2f", estimate)) %>%
+#     dplyr::rename(b = estimate) %>%
+#     select(type, everything())
+#   return(tab)
+# }
+# tab <- table_fun(acc_pred_3)
+@
+
+\subsection*{Making the Table}
+
+<<results=tex, echo=FALSE>>=
+# library(papaja)
+# 
+# papaja::apa_table(tab %>% select(-type),caption = "Naming Accuracy Regression Table", 
+#     na_string = "", stub_indents = list(Fixed = c(1:4), Random = 5, Summary = c(6:8)),
+#     col_spanners = list(`Naming Accuracy` = c(2,3)))
+@
+
+\section {Naming Accuracy as a Factor}
+
+<<>>=
+##creatng a factor term for naming accuracy
+cell$acc_fac = as.factor(as.character(cell$Accuracy))
+
+time_model_6 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 +
+                                    acc_fac + (Month_0|ID))
+summary(time_model_6)
+
+## adding interaction term
+time_model_7 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 +
+                                    acc_fac + Month_0*acc_fac + (Month_0|ID))
+summary(time_model_7)
+
+anova(time_model_5, time_model_6)
+anova(time_model_6, time_model_7)
+
+## thus, time_model_7 is a better model
+@
+
+\subsection*{Plotting The Temporal Distance Model}
+
+\subsubsection*{Using sjPlot}
+
+<<echo=FALSE, fig=TRUE>>=
+sjp.int(time_model_7, type = "eff", swap.pred = T, p.kr = F, show.ci = T)
+@
+
+\subsubsection*{Using predict()}
+
+<<echo=FALSE>>=
+fixed.frame <- 
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      Month_0 = seq(0,11,1), 
+      acc_fac = c(0, 1))) %>%
+      mutate("acc_month" = Month_0*acc_fac) # %>%
+  #    mutate(pred = predict(time_model_7, newdata = ., re.form = NA)) 
+### GETTING AN ERROR ABOVE!
+
+# fixed.frame %>%
+#   mutate(age = age0 + 14) %>%
+#   ggplot(aes(x = age, y = pred, color = groups)) +
+#     geom_line(size = 2) + 
+#     lims(y = c(0,4)) +
+#     labs(x = "Age", y = "Sensation Seeking Composite",
+#          title = "2 Group Time Invariant Conditional Growth Models") +
+#     theme_classic() +
+#     theme(axis.text = element_text(face = "bold", size = rel(1.2)),
+#           axis.title = element_text(face = "bold", size = rel(1.2)),
+#           legend.title = element_text(face = "bold", size = rel(1.2)),
+#           plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+@
+
+\section {Naming Accuracy and Vividness as IVs}
+
+<<>>=
+time_model_8 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 +
+                                    acc_fac + Month_0*acc_fac + 
+                                      Vividness  +
+                                          (Month_0|ID))
+summary(time_model_8)
+
+anova(time_model_7, time_model_8)
+
+#3-way interaction
+
+time_model_9 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 +
+                                    acc_fac + Month_0*acc_fac + 
+                                      Vividness +  Month_0*acc_fac*Vividness +
+                                          (Month_0|ID))
+summary(time_model_9)
+
+anova(time_model_8, time_model_9)
+
+## Thus the 3-way model is better. This is the final model for Temporal Distance.
+@
+
+\section {Plotting Final Temporal Model}
+
+<<echo=FALSE, fig=TRUE>>=
+library(ggplot2)
+library(ggthemes)
+
+for(i in 1:nrow(cell)){
+  if(cell[i,"Vividness"] <= 4.2) {
+    cell[i, "VividnessLevel"] = "-1SD"
+  }
+  else if(cell[i,"Vividness"] <= 7.3) {
+    cell[i, "VividnessLevel"] = "0SD"
+  }
+  else
+    cell[i, "VividnessLevel"] = "+1SD"
+  
+}
+
+cell$VividnessLevel = as.factor(as.character(cell$VividnessLevel))
+
+cell %>%
+  ggplot(aes(x = Month_0, y = TimeJudgmentDistance, color = VividnessLevel)) +
+    geom_smooth(method = "lm") + 
+  facet_wrap(~acc_fac)+
+       theme_few() +
+   labs(x = "Days", y = "Time Estimate") + 
+  ggtitle("TimeEstimate as a function of \n Days and Vividness") +
+  theme(axis.text = element_text( size = rel(1)),
+          axis.title = element_text( size = rel(1)),
+          legend.title = element_text( size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+@
+\end{document}
