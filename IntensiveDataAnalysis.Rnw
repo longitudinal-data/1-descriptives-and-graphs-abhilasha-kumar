@@ -191,7 +191,7 @@ cell$Month_0 = cell$Month - 1
 acc_model_4 = glmer(data = cell, Accuracy ~ Month_0 + (1|ID), family = "binomial")
 summary(acc_model_4)
 
-## model with random slope of Month_0 does not converge. acc_model_4 is the final model.
+## model with random slope of Month_0 does not converge. acc_model_4 is new final model.
 
 time_model_4 = lmer(data = cell, TimeJudgmentDistance ~ Month_0 + (1|ID))
 summary(time_model_4)
@@ -304,7 +304,7 @@ summary(time_pred_3)
 
 \subsection*{Naming Accuracy}
 
-<<>>=
+<<echo = FALSE, fig=TRUE>>=
 sjPlot::sjp.glmer(acc_pred_3, type = "eff", vars = c("Month_0", "messages_pc"))
 @
 
@@ -327,7 +327,7 @@ fixed.frame <-
       messages_mean = c(fixed.frame$mean_grand-fixed.frame$sd_grand,
                      fixed.frame$mean_grand,
                      fixed.frame$mean_grand+fixed.frame$sd_grand) ) %>%
-    mutate(pred = predict(acc_pred_3, newdata = ., re.form = NA)) ## geting an error here
+    mutate(pred = predict(acc_pred_3, newdata = ., re.form = NA)) 
 
 
 library(ggplot2)
@@ -336,7 +336,7 @@ fixed.frame %>%
   mutate(MessageLevel = factor(messages_pc, levels = unique(messages_pc), 
                                  labels = c("-1SD", "0SD", "1SD"))) %>%
   ggplot(aes(x = Month_0, y = pred, color = MessageLevel)) +
-    geom_smooth(method = "loess") + 
+    stat_smooth() + 
        theme_few() +
    labs(x = "Month", y = "Naming Accuracy") + 
   ggtitle("Naming Accuracy as a function of \n Month and Messages") +
@@ -351,69 +351,69 @@ fixed.frame %>%
 \subsection*{Storing Table into a Dataframe}
 
 <<echo=FALSE>>=
-# library(MuMIn)
-# library(tibble)
-# library(plyr)
-# library(dplyr)
-# 
-# ## fixed effects first ##
-# table_fun <- function(model){
-#   fixed <- broom::tidy(model) %>% filter(group == "fixed") %>%
-#     select(term, estimate) 
-#   ## add random effects ##
-#   rand <- broom::tidy(model) %>% filter(group != "fixed") %>%
-#     select(term, estimate)
-#   ## get confidence intervals ##
-#   CI <- data.frame(confint.merMod(model, method = "boot", nsim = 10)) %>%
-#     mutate(term = rownames(.)) %>% setNames(c("lower", "upper", "term"))
-#   
-#   ## Get ICC & R2 values ##
-#   ICC <- reghelper::ICC(model)
-#   R2 <- MuMIn::r.squaredGLMM(model)
-#   
-#   ## format the fixed effects
-#   fixed <- fixed %>% left_join(CI %>% filter(!grepl(".sig", term))) %>%
-#     mutate(type = "Fixed Parts")
-#   
-#   rand <- rand %>%
-#     mutate(estimate = ifelse(grepl("cor", term) == T, estimate, estimate^2),
-#           term = mapvalues(term, unique(term), 
-#            c("$\\tau_{00}$"))) %>%
-#     left_join(
-#       CI %>% filter(grepl(".sig", term)) %>%
-#         mutate(term = mapvalues(term, unique(term), 
-#             c("$\\tau_{00}$")),
-#             lower = lower^2, upper = upper^2)) %>%
-#     mutate(type = "Random Parts")
-#   
-#   mod_terms <- tribble(
-#     ~term, ~estimate, ~type,
-#     "ICC", ICC, "Model Terms",
-#     "$R^2_m$", R2[1], "Model Terms",
-#     "$R^2_c$", R2[2], "Model Terms"
-#   )
-#   
-#   tab <- fixed %>%
-#     full_join(rand) %>%
-#     mutate(CI = sprintf("(%.2f, %.2f)", lower, upper)) %>%
-#     select(-lower, -upper) %>%
-#     full_join(mod_terms) %>%
-#     mutate(estimate = sprintf("%.2f", estimate)) %>%
-#     dplyr::rename(b = estimate) %>%
-#     select(type, everything())
-#   return(tab)
-# }
-# tab <- table_fun(acc_pred_3)
+library(MuMIn)
+library(tibble)
+library(plyr)
+library(dplyr)
+
+## fixed effects first ##
+table_fun <- function(model){
+  fixed <- broom::tidy(model) %>% filter(group == "fixed") %>%
+    select(term, estimate)
+  ## add random effects ##
+  rand <- broom::tidy(model) %>% filter(group != "fixed") %>%
+    select(term, estimate)
+  ## get confidence intervals ##
+  CI <- data.frame(confint.merMod(model, method = "boot", nsim = 10)) %>%
+    mutate(term = rownames(.)) %>% setNames(c("lower", "upper", "term"))
+
+  ## Get ICC & R2 values ##
+  ICC <- reghelper::ICC(model)
+  R2 <- MuMIn::r.squaredGLMM(model)
+
+  ## format the fixed effects
+  fixed <- fixed %>% left_join(CI %>% filter(!grepl(".sig", term))) %>%
+    mutate(type = "Fixed Parts")
+
+  rand <- rand %>%
+    mutate(estimate = ifelse(grepl("cor", term) == T, estimate, estimate^2),
+          term = mapvalues(term, unique(term),
+           c("$\\tau_{00}$"))) %>%
+    left_join(
+      CI %>% filter(grepl(".sig", term)) %>%
+        mutate(term = mapvalues(term, unique(term),
+            c("$\\tau_{00}$")),
+            lower = lower^2, upper = upper^2)) %>%
+    mutate(type = "Random Parts")
+
+  mod_terms <- tribble(
+    ~term, ~estimate, ~type,
+    "ICC", ICC, "Model Terms",
+    "$R^2_m$", R2[1], "Model Terms",
+    "$R^2_c$", R2[2], "Model Terms"
+  )
+
+  tab <- fixed %>%
+    full_join(rand) %>%
+    mutate(CI = sprintf("(%.2f, %.2f)", lower, upper)) %>%
+    select(-lower, -upper) %>%
+    full_join(mod_terms) %>%
+    mutate(estimate = sprintf("%.2f", estimate)) %>%
+    dplyr::rename(b = estimate) %>%
+    select(type, everything())
+  return(tab)
+}
+tab <- table_fun(acc_pred_3)
 @
 
 \subsection*{Making the Table}
 
 <<results=tex, echo=FALSE>>=
-# library(papaja)
-# 
-# papaja::apa_table(tab %>% select(-type),caption = "Naming Accuracy Regression Table", 
-#     na_string = "", stub_indents = list(Fixed = c(1:4), Random = 5, Summary = c(6:8)),
-#     col_spanners = list(`Naming Accuracy` = c(2,3)))
+library(papaja)
+
+papaja::apa_table(tab %>% select(-type),caption = "Naming Accuracy Regression Table",
+    na_string = "", stub_indents = list(Fixed = c(1:4), Random = 5, Summary = c(6:8)),
+    col_spanners = list(`Naming Accuracy` = c(2,3)))
 @
 
 \section {Naming Accuracy as a Factor}
@@ -442,34 +442,33 @@ anova(time_model_6, time_model_7)
 \subsubsection*{Using sjPlot}
 
 <<echo=FALSE, fig=TRUE>>=
-sjp.int(time_model_7, type = "eff", swap.pred = T, p.kr = F, show.ci = T)
+sjPlot::sjp.int(time_model_7, type = "eff", swap.pred = T, p.kr = F, show.ci = T)
 @
 
 \subsubsection*{Using predict()}
 
-<<echo=FALSE>>=
-fixed.frame <- 
+<<echo=FALSE, fig=TRUE>>=
+fixed.frame <-
   data.frame(
     expand.grid(
       # here, you add values for your time variable and predictors
-      Month_0 = seq(0,11,1), 
-      acc_fac = c(0, 1))) %>%
-      mutate("acc_month" = Month_0*acc_fac) # %>%
-  #    mutate(pred = predict(time_model_7, newdata = ., re.form = NA)) 
-### GETTING AN ERROR ABOVE!
+      Month_0 = seq(0,11,1),
+      acc_fac = factor(c(0, 1)))) 
+      #mutate("acc_month" = Month_0*acc_fac) %>% ## no need if using predict
+fixed.frame$pred = predict(time_model_7, newdata = fixed.frame, re.form = NA)
 
-# fixed.frame %>%
-#   mutate(age = age0 + 14) %>%
-#   ggplot(aes(x = age, y = pred, color = groups)) +
-#     geom_line(size = 2) + 
-#     lims(y = c(0,4)) +
-#     labs(x = "Age", y = "Sensation Seeking Composite",
-#          title = "2 Group Time Invariant Conditional Growth Models") +
-#     theme_classic() +
-#     theme(axis.text = element_text(face = "bold", size = rel(1.2)),
-#           axis.title = element_text(face = "bold", size = rel(1.2)),
-#           legend.title = element_text(face = "bold", size = rel(1.2)),
-#           plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+fixed.frame %>%
+  mutate(Accuracy = factor(acc_fac, levels = unique(acc_fac),
+                          labels = c("Incorrect Name", "Correct Name")))%>%
+  ggplot(aes(x = Month_0, y = pred, color = Accuracy)) +
+    geom_line(size = 1) +
+        labs(x = "Month", y = "Temporal Distance",
+         title = "Temporal Distance: Interaction") +
+    theme_classic() +
+    theme(axis.text = element_text(face = "bold", size = rel(1)),
+          axis.title = element_text(face = "bold", size = rel(1)),
+          legend.title = element_text(face = "bold", size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
 @
 
 \section {Naming Accuracy and Vividness as IVs}
@@ -526,6 +525,43 @@ cell %>%
   theme(axis.text = element_text( size = rel(1)),
           axis.title = element_text( size = rel(1)),
           legend.title = element_text( size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+@
+
+\subsubsection*{Using predict()}
+
+<<echo=FALSE, fig=TRUE>>=
+fixed.frame <- cell %>% select(Vividness) %>%
+  dplyr::summarise(mean = mean(Vividness, na.rm = T), 
+            sd = sd(Vividness, na.rm = T))
+
+fixed.frame <-
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      Month_0 = seq(0,11,1),
+      acc_fac = factor(c(0, 1)),
+      Vividness = c(fixed.frame$mean-fixed.frame$sd,
+                     fixed.frame$mean,
+                     fixed.frame$mean+fixed.frame$sd))) 
+      #mutate("acc_month" = Month_0*acc_fac) %>% ## no need if using predict
+fixed.frame$pred = predict(time_model_9, newdata = fixed.frame, re.form = NA)
+
+fixed.frame %>%
+  mutate(Accuracy = factor(acc_fac, levels = unique(acc_fac),
+                          labels = c("Incorrect Name", "Correct Name")),
+         VividnessLevel = factor(Vividness, levels = unique(Vividness),
+                                 labels = c("-1SD", "0SD", "1SD"))) %>%
+  ggplot(aes(x = Month_0, y = pred, color = VividnessLevel)) +
+    geom_line(size = 1) +
+  ylim(0,5)+
+        labs(x = "Month", y = "Temporal Distance",
+         title = "Temporal Distance: 3-way Interaction") +
+  facet_wrap(~Accuracy) +
+    theme_few() +
+    theme(axis.text = element_text(face = "bold", size = rel(1)),
+          axis.title = element_text(face = "bold", size = rel(1)),
+          legend.title = element_text(face = "bold", size = rel(1)),
           plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
 @
 \end{document}
