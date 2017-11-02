@@ -1,0 +1,403 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Assignment 5: SEM}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+library(sjPlot)
+library(lme4)
+library(plyr)
+library(dplyr)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+We first create a Wave variable that bins the months into 4-month intervals, so that we have 3 time points for each person. 
+
+<<>>=
+cell_demo = read.csv("cell_demo.csv", header = TRUE, sep = ",")
+cell = read.csv("cell_withitems_complete.csv", header = TRUE, sep = ",")
+
+cell = merge(cell, cell_demo, by = "ID")
+cell$ID = as.factor(as.character(cell$ID))
+
+for(i in 1:nrow(cell)){
+ if(cell[i,12] <= 4){
+    cell[i,20] = 1
+  }
+  else if(cell[i,12] > 4 & cell[i,12]<= 8){
+    cell[i,20] = 2
+  }
+  
+    else
+    cell[i,20] = 3
+}
+
+colnames(cell)[20] = "Wave"
+@
+
+\section {Converting Data to Wide Format}
+
+<<>>=
+library(plyr)
+library(dplyr)
+
+accuracy_time = group_by(cell, ID, Wave) %>%
+    summarise_at(vars(Accuracy), mean)
+
+messages_time = group_by(cell, ID, Wave) %>%
+    summarise_at(vars(Messages), mean)
+
+memorability_time = group_by(cell, ID, Wave) %>%
+    summarise_at(vars(Memorablity), mean)
+
+td_time = group_by(cell, ID, Wave) %>%
+    summarise_at(vars(TimeJudgmentDistance), mean)
+
+vivid_time = group_by(cell, ID, Wave) %>%
+    summarise_at(vars(Vividness), mean)
+
+## long to wide
+
+acc_wide = tidyr::spread(accuracy_time, Wave, Accuracy)
+colnames(acc_wide) = c("Subject", "Q1_Acc", "Q2_Acc", "Q3_Acc")
+
+messages_wide = tidyr::spread(messages_time, Wave, Messages)
+colnames(messages_wide) = c("Subject", "Q1_mess", "Q2_mess", "Q3_mess")
+
+mem_wide = tidyr::spread(memorability_time, Wave, Memorablity)
+colnames(mem_wide) = c("Subject", "Q1_mem", "Q2_mem", "Q3_mem")
+
+
+td_wide = tidyr::spread(td_time, Wave, TimeJudgmentDistance)
+colnames(td_wide) = c("Subject", "Q1_td", "Q2_td", "Q3_td")
+
+vivid_wide = tidyr::spread(td_time, Wave, TimeJudgmentDistance)
+colnames(vivid_wide) = c("Subject", "Q1_v", "Q2_v", "Q3_v")
+
+cell_wide = Reduce(function(x,y) merge(x,y, all = TRUE), list(acc_wide, messages_wide, mem_wide, td_wide, vivid_wide))
+
+cell_wide[,c(5:10)] = cell_wide[,c(5:10)]/100
+cell_wide[,c(11:16)] = cell_wide[,c(11:16)]/10
+
+@
+\section {Measurement Model with 1 Time Point}
+
+\subsection *{Default Marker Variable Loading}
+<<>>=
+cell.model.1 <- 'NameMemory =~ Q1_Acc + Q1_mem + Q1_mess + Q1_v'  
+
+library(lavaan)
+library(semPlot)
+library(semTools)
+
+m_marker = lavaan::cfa(cell.model.1,  data = cell_wide)
+summary(m_marker, fit.measures = TRUE)
+@
+\subsubsection *{Plotting}
+<<fig=TRUE>>=
+semPaths(m_marker, whatLabels = "est")
+@
+
+<<fig=TRUE>>=
+semPaths(m_marker, what = "std")
+@
+
+\subsection *{Fixed Factor Loading}
+
+<<>>=
+m_fixed = lavaan::cfa(cell.model.1, data = cell_wide, std.lv = TRUE)
+summary(m_fixed, fit.measures = TRUE)
+@
+
+When we keep the marker loading, the first indicator variable is weighted 1, and all the other estimates are compared to that first indicator. In fixed-factor loading we constrain the variance of the latent variable to 1. Thus, we see in the summary() output for both models that the variance estimates are different for the latent variable. Also note that the estimates for each of the indicator variables is different, which makes sense because the estimates in the are relative to Q1acc and they are not constrained in the fixed-factor model. 
+
+Note, however, that the overall fit statistics do not change i.e. both have the same values for SRMR and RMSEA. 
+
+\section {Fit Statistics}
+
+The fit statistics for the marker model are as follows: RMSEA is 0, SRMR is 0.035, thus this a fairly good fitting model. CFI =1, TLI = -.527, high CFI indicates a good fit.   
+
+The degrees of freedom are 2. 
+
+\section {Longitudinal CFA Model}
+
+\subsection *{Correlating Latent Factors}
+
+<<>>=
+long_model = 'NameMem_1 =~ Q1_Acc + Q1_mem + Q1_mess + Q1_v
+              NameMem_2 =~ Q2_Acc + Q2_mem + Q2_mess + Q2_v
+              NameMem_3 =~ Q3_Acc + Q3_mem + Q3_mess + Q3_v'
+
+long_model_fit = lavaan::cfa(long_model, missing = "ML", data = cell_wide)
+summary(long_model_fit, fit.measures = TRUE)
+@
+
+<<fig=TRUE>>=
+semPaths(long_model_fit, whatLabels = "est")
+@
+
+<<fig=TRUE>>=
+semPaths(long_model_fit, what = "std")
+@
+
+When we correlate the latent factors across time, we find Name Memory at Wave 2 is strongly predicted by Name Memory at Wave 1. We also find that the auto-regressive model fails to converge. 
+
+\subsection *{Auto-regressive}
+
+<<>>=
+long_model.2 = 'NameMem_1 =~ Q1_Acc + Q1_mem + Q1_mess + Q1_v
+              NameMem_2 =~ Q2_Acc + Q2_mem + Q2_mess + Q2_v
+              NameMem_3 =~ Q3_Acc + Q3_mem + Q3_mess + Q3_v
+
+              NameMem_2 ~ NameMem_1
+              '
+
+#auto_fit = lavaan::cfa(long_model.2, missing = "ML", data = cell_wide)
+#summary(auto_fit, fit.measures = TRUE) ## does not converge! 
+@
+
+\subsubsection*{Plotting}
+
+<<>>=
+#semPaths(auto_fit, what = "est")
+@
+
+<<>>=
+#semPaths(auto_fit, what = "std")
+@
+
+
+\section {SEM and HLM}
+
+\subsection *{HLM Models}
+
+<<>>=
+library(lme4)
+hlm_model_fixed = lmer(data = accuracy_time, Accuracy ~ Wave + (1|ID))
+summary(hlm_model_fixed)
+
+hlm_model_random = lmer(data = accuracy_time, Accuracy ~ Wave + (Wave|ID))
+summary(hlm_model_random)
+@
+
+\subsection*{SEM Models}
+
+\subsubsection*{Fixed SEM Model}
+<<>>=
+### FIXED SLOPE
+
+sem_fixed = 'intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              slope =~ 0*Q1_Acc + 1*Q2_Acc + 2*Q3_Acc 
+              slope ~~ 0*slope'
+
+sem_fixed_model = growth(sem_fixed, missing = "ML", data = cell_wide)
+summary(sem_fixed_model, fit.measures = TRUE)
+@
+
+\subsubsection *{Plotting}
+<<fig=TRUE>>=
+semPaths(sem_fixed_model, whatLabels = "est")
+@
+
+<<fig=TRUE>>=
+semPaths(sem_fixed_model, what = "std")
+@
+\subsubsection*{Random SEM Model}
+
+<<>>=
+### RANDOM SLOPE
+
+sem_random = 'intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              slope =~ 0*Q1_Acc + 1*Q2_Acc + 2*Q3_Acc'
+              
+
+sem_random_model = growth(sem_random, missing = "ML", data = cell_wide)
+summary(sem_random_model, fit.measures = TRUE)
+@
+
+Changing from random to fixed (or the other way), changes the variance estimate of the slope. In the fixed SEM model, the variance estimate for the slope is 0 i.e. it is fixed, whereas is is 0.017 in the random SEM model. Further, also note that the estimates themselves of the intercept and slope change, although only slightly. 
+
+
+\subsubsection *{Plotting}
+<<fig=TRUE>>=
+semPaths(sem_random_model, whatLabels = "est")
+@
+
+<<fig=TRUE>>=
+semPaths(sem_random_model, what = "std")
+@
+
+\subsection {Model Comparison}
+
+<<>>=
+anova(sem_fixed_model, sem_random_model) ## FIXED MODEL IS BETTER
+@
+
+Comparing SEM and HLM models we realize that the estimates for the slope and intercept are close to each other in both models.    
+
+\section {Constraining Residual Variances}
+
+<<>>=
+sem_res = 'intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              slope =~ 0*Q1_Acc + 1*Q2_Acc + 2*Q3_Acc 
+              Q1_Acc ~~ a*Q1_Acc
+              Q2_Acc ~~ a*Q2_Acc
+              Q3_Acc ~~ a*Q3_Acc'
+              
+
+sem_res_model = growth(sem_res, missing = "ML", data = cell_wide)
+summary(sem_res_model, fit.measures =TRUE)
+@
+
+Constraining the residual variances changes the estimate of the slope and intercept, as well as the variance estimates of the slope and intercept. Note also that the variance estimate for the indicator variables is the same now, because we constrained it to be so. 
+
+\subsection*{Plotting}
+
+<<fig=TRUE>>=
+semPaths(sem_res_model, whatLabels = "est")
+@
+
+<<fig=TRUE>>=
+semPaths(sem_res_model, what = "std")
+@
+
+\subsection {Model Comparison}
+
+<<>>=
+anova(sem_random_model, sem_res_model) ## random model is better
+@
+
+\section {Changing the Time Metric}
+
+We change centering to last wave instead of first wave. Note that we will use the random slope model as it has the lowest SRMR and RMSEA fit statistics.
+
+<<>>=
+sem_time_model = 'intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              slope =~ -2*Q1_Acc + -1*Q2_Acc + 0*Q3_Acc'
+              
+
+sem_time_model = growth(sem_time_model, missing = "ML", data = cell_wide)
+summary(sem_time_model, fit.measures = TRUE)
+@
+
+\subsection {Model Comparison}
+
+<<>>=
+anova(sem_random_model, sem_time_model) ## no diference
+@
+
+\subsection {Evaluating Fits}
+
+\subsubsection {Fixed SEM Model}
+
+RMSEA: .294, SRMR = .138
+
+\subsubsection {Random SEM Model}
+
+RMSEA: .213, SRMR = .07
+
+\subsubsection {Constrained residual variances SEM Model}
+
+RMSEA: .385, SRMR = .365
+
+\subsubsection {Changed Time Metric SEM Model}
+
+RMSEA: .213, SRMR = .07
+
+Thus, as we notice, changing the time metric for the random slope model does not change the overall fit of the SEM model. However, there is a change in the intercept, since we are now looking at differences in name accuracy in the LAST wave, as opposed to the first wave. Also note that there is NO change in the estimate of the slope variable, i.e. the overall association between Name Accuracy and Time doesn't change by changing the time metric. Also, the slope estimate is negative, which means there's a negative association between naming accuracy and time, which is consistent with the MLM models run previously.   
+
+\section {Different Estimators}
+
+Our final model is the random slopes model. We now use a different estimation technique for this model to see if there are any differences. Since our data is not complete, we will only use estimators that don't require complete data: MLF and MLR. 
+
+<<>>=
+sem_random = 'intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              slope =~ 0*Q1_Acc + 1*Q2_Acc + 2*Q3_Acc'
+              
+
+sem_random_mlf = growth(sem_random, data = cell_wide, estimator = "MLF")
+summary(sem_random_mlf, fit.measures = TRUE)
+
+
+sem_random_mlr = growth(sem_random, data = cell_wide, estimator = "MLR")
+summary(sem_random_mlr, fit.measures = TRUE)
+@
+
+Note that the estimates of slope and intercept slightly change if we change the estimator, but the overall fit remains the same. 
+
+\section {Adding New Latent Variable}
+
+<<>>=
+sem_two_lv = 'name_intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              name_slope =~ 0*Q1_Acc + 1*Q2_Acc + 2*Q3_Acc
+              time_intercept =~ 1*Q1_td + 1*Q2_td + 1*Q3_td 
+              time_slope =~ 0*Q1_td + 1*Q2_td + 2*Q3_td'
+
+              
+
+sem_twolv_model = growth(sem_two_lv, data = cell_wide, estimator = "MLF")
+summary(sem_twolv_model, fit.measures = TRUE)
+@
+
+\subsubsection*{Plotting}
+
+<<fig = TRUE>>=
+semPaths(sem_twolv_model, layout = "circle2", whatLabels = "est")
+@
+
+<<fig = TRUE>>=
+semPaths(sem_twolv_model, layout = "circle2",  what = "std")
+@
+
+\section {Adding Another Predictor}
+
+<<>>=
+sem_newpred = 'name_intercept =~ 1*Q1_Acc + 1*Q2_Acc + 1*Q3_Acc 
+              name_slope =~ 0*Q1_Acc + 1*Q2_Acc + 2*Q3_Acc
+              time_intercept =~ 1*Q1_td + 1*Q2_td + 1*Q3_td 
+              time_slope =~ 0*Q1_td + 1*Q2_td + 2*Q3_td
+
+                Q1_Acc ~ Q1_v
+                Q2_Acc ~ Q2_v
+                Q3_Acc ~ Q3_v'
+
+sem_newpred = growth(sem_newpred, data = cell_wide, estimator = "MLF")
+summary(sem_newpred, fit.measures = TRUE)
+
+@
+
+<<fig = TRUE>>=
+semPaths(sem_newpred, layout = "circle2", whatLabels = "est")
+@
+
+<<fig = TRUE>>=
+semPaths(sem_newpred, layout = "circle2",  what = "std")
+@
+
+
+\end{document}
