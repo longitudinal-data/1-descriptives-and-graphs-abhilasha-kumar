@@ -1,0 +1,390 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Assignment 6: SEM}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+library(sjPlot)
+library(lme4)
+library(plyr)
+library(dplyr)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+I am going to use the class dataset for Questions 1 and 2, and the lavaan dataset, HolzingerSwineford1939 for the multiple group analyses. 
+
+<<>>=
+library(lavaan)
+head(HolzingerSwineford1939)
+sem_long = read.csv("SEM_long.csv", header = TRUE, sep = ",")
+head(sem_long)
+@
+
+\section {Testing Measurement Invariance}
+
+\subsection*{Configural}
+<<>>=
+config <- '
+## define latent variables
+PosAffect1 =~ PosAFF11 + PosAFF21 + PosAFF31
+PosAffect2 =~ PosAFF12 + PosAFF22 + PosAFF32
+PosAffect3 =~ PosAFF13 + PosAFF23 + PosAFF33
+
+
+## correlated residuals across time
+PosAFF11 ~~ PosAFF12 + PosAFF13
+PosAFF12 ~~ PosAFF13
+PosAFF21 ~~ PosAFF22 + PosAFF23
+PosAFF22 ~~ PosAFF23
+PosAFF31 ~~ PosAFF32 + PosAFF33
+PosAFF32 ~~ PosAFF33
+'
+
+config <- cfa(config, data=sem_long, meanstructure=TRUE, std.lv=TRUE)
+
+summary(config, standardized=TRUE, fit.measures=TRUE)
+@
+
+\subsection* {Weak: Constrain Loadings}
+
+<<>>=
+weak <- '
+## define latent variables
+PosAffect1 =~ L1*PosAFF11 + L2*PosAFF21 + L3*PosAFF31
+PosAffect2 =~ L1*PosAFF12 + L2*PosAFF22 + L3*PosAFF32
+PosAffect3 =~ L1*PosAFF13 + L2*PosAFF23 + L3*PosAFF33
+
+
+## free latent variances at later times (only set the scale once)
+PosAffect2 ~~ NA*PosAffect2
+PosAffect3 ~~ NA*PosAffect3
+
+## correlated residuals across time
+PosAFF11 ~~ PosAFF12 + PosAFF13
+PosAFF12 ~~ PosAFF13
+PosAFF21 ~~ PosAFF22 + PosAFF23
+PosAFF22 ~~ PosAFF23
+PosAFF31 ~~ PosAFF32 + PosAFF33
+PosAFF32 ~~ PosAFF33
+
+
+'
+
+weak <- cfa(weak, data=sem_long, meanstructure=TRUE, std.lv=TRUE)
+
+summary(weak, standardized=TRUE, fit.measures=TRUE)
+
+@
+
+<<>>=
+anova(config, weak)
+@
+
+\subsection *{Strong: Constrain Intercepts, Slopes}
+
+<<>>=
+strong <- '
+## define latent variables
+Pos1 =~ L1*PosAFF11 + L2*PosAFF21 + L3*PosAFF31
+Pos2 =~ L1*PosAFF12 + L2*PosAFF22 + L3*PosAFF32
+Pos3 =~ L1*PosAFF13 + L2*PosAFF23 + L3*PosAFF33
+
+
+## free latent variances at later times (only set the scale once)
+Pos2 ~~ NA*Pos2
+Pos3 ~~ NA*Pos3
+
+
+## correlated residuals across time
+PosAFF11 ~~ PosAFF12 + PosAFF13
+PosAFF12 ~~ PosAFF13
+PosAFF21 ~~ PosAFF22 + PosAFF23
+PosAFF22 ~~ PosAFF23
+PosAFF31 ~~ PosAFF32 + PosAFF33
+PosAFF32 ~~ PosAFF33
+
+
+## constrain intercepts across time
+PosAFF11 ~ t1*1
+PosAFF21 ~ t2*1
+PosAFF31 ~ t3*1
+
+
+PosAFF12 ~ t1*1
+PosAFF22 ~ t2*1
+PosAFF32 ~ t3*1
+
+
+PosAFF13 ~ t1*1
+PosAFF23 ~ t2*1
+PosAFF33 ~ t3*1
+
+
+## free latent means at later times (only set the scale once)
+Pos2 ~ NA*1
+Pos3 ~ NA*1'
+
+strong <- cfa(strong, data=sem_long, meanstructure=TRUE, std.lv=TRUE)
+
+summary(strong, standardized=TRUE, fit.measures=TRUE)
+@
+
+<<>>=
+anova(weak, strong)
+@
+
+Yes, there is strong measurement invariance and we can run growth models.
+
+\section {Second Order Growth Model}
+
+<<>>=
+sec.order <- '
+## define latent variables
+Pos1 =~ NA*PosAFF11 + L1*PosAFF11 + L2*PosAFF21 + L3*PosAFF31
+Pos2 =~ NA*PosAFF12 + L1*PosAFF12 + L2*PosAFF22 + L3*PosAFF32
+Pos3 =~ NA*PosAFF13 + L1*PosAFF13 + L2*PosAFF23 + L3*PosAFF33
+
+## intercepts
+PosAFF11 ~ t1*1
+PosAFF21 ~ t2*1
+PosAFF31 ~ t3*1
+
+PosAFF12 ~ t1*1
+PosAFF22 ~ t2*1
+PosAFF32 ~ t3*1
+
+PosAFF13 ~ t1*1
+PosAFF23 ~ t2*1
+PosAFF33 ~ t3*1
+
+
+## correlated residuals across time
+PosAFF11 ~~ PosAFF12 + PosAFF13
+PosAFF12 ~~ PosAFF13
+PosAFF21 ~~ PosAFF22 + PosAFF23
+PosAFF22 ~~ PosAFF23
+PosAFF31 ~~ PosAFF32 + PosAFF33
+PosAFF32 ~~ PosAFF33
+
+
+## latent variable intercepts
+Pos1 ~ 0*1
+Pos2  ~ 0*1
+Pos3  ~ 0*1
+
+#model constraints for effect coding
+## loadings must average to 1
+L1 == 3 - L2 - L3
+## means must average to 0
+t1 == 0 - t2 - t3
+
+i =~ 1*Pos1 + 1*Pos2 + 1*Pos3 
+s =~ 0*Pos1 + 1*Pos2 + 2*Pos3 '
+
+
+fit.sec.order <- growth(sec.order, data=sem_long, missing = "ML")
+summary(fit.sec.order, fit.measures=TRUE)
+@
+
+\subsection *{Plotting}
+<<fig=TRUE>>=
+library(semPlot)
+library(semTools)
+semPaths(fit.sec.order, whatLabels = "est", panelGroups = TRUE)
+@
+
+\subsection *{Comparing with Normal Growth Model}
+
+<<fig=TRUE>>=
+simple.growth <- 'i_1 =~ 1*PosAFF11 + 1*PosAFF21 + 1*PosAFF31 
+                  s_1 =~ 0*PosAFF11 + 1*PosAFF21 + 2*PosAFF31
+                  i_2 =~ 1*PosAFF12 + 1*PosAFF22 + 1*PosAFF32 
+                  s_2 =~ 0*PosAFF12 + 1*PosAFF22 + 2*PosAFF32
+                  i_3 =~ 1*PosAFF13 + 1*PosAFF23 + 1*PosAFF33 
+                  s_3 =~ 0*PosAFF13 + 1*PosAFF23 + 2*PosAFF33
+'
+
+fit.growth <- growth(simple.growth, data=sem_long)
+summary(fit.growth, fit.measures = TRUE)
+semPaths(fit.growth, whatLabels = "est", panelGroups = TRUE)
+@
+
+<<>>=
+anova(fit.sec.order, fit.growth)
+@
+
+\section{Multiple Groups}
+
+<<>>=
+groupmodel.1 <- ' visual =~ x1 + x2 + x3
+                textual =~ x4 + x5 + x6
+                speed   =~ x7 + x8 + x9 '
+
+fit.1 <- cfa(groupmodel.1, 
+           data = HolzingerSwineford1939, 
+           group = "sex")
+
+summary(fit.1, standardized=TRUE, fit.measures=TRUE)
+@
+
+\subsection *{Plotting}
+<<fig=TRUE>>=
+library(semPlot)
+library(semTools)
+semPaths(fit.1, whatLabels = "est", panelGroups = TRUE)
+@
+
+\subsection * {Constraining Parameters}
+
+\subsubsection {Constraining Means}
+
+\textbf{Constraining Visual Means}
+
+<<>>=
+groupmodel.2.1 <- ' visual =~ c(L1,L1)*x1 + c(L2, L2)*x2 + c(L3,L3)*x3
+                textual =~ x4 + x5 + x6
+                speed   =~ x7 + x8 + x9 '
+
+fit.2.1 <- cfa(groupmodel.2.1, 
+           data = HolzingerSwineford1939, 
+           group = "sex")
+summary(fit.2.1, standardized=TRUE, fit.measures=TRUE)
+@
+
+Now we compare the two fits:
+<<>>=
+anova(fit.1,fit.2.1)
+@
+
+Thus, contraining the means did not make the model fit worse i.e. the groups are not reliably different from each other. If they were, constraining the means to be the same would have produced a worse fit. Thus, men and women don't differ on visual ability in these data.
+
+\textbf{Constraining Textual Means}
+
+<<>>=
+groupmodel.2.2 <- ' visual =~ x1 + x2 + x3
+                textual =~ c(L1,L1)*x4 + c(L2, L2)*x5 + c(L3,L3)*x6
+                speed   =~ x7 + x8 + x9 '
+
+fit.2.2 <- cfa(groupmodel.2.2, 
+           data = HolzingerSwineford1939, 
+           group = "sex")
+summary(fit.2.2, standardized=TRUE, fit.measures=TRUE)
+@
+
+Now we compare the two fits:
+<<>>=
+anova(fit.1,fit.2.2)
+@
+
+Similar to visual, men and women do not differ on textual ability.
+
+\textbf{Constraining Speed Means}
+
+<<>>=
+groupmodel.2.3 <- ' visual =~ x1 + x2 + x3
+                textual =~ x4 + x5 + x6
+                speed   =~ c(L1,L1)*x7 + c(L2, L2)*x8 + c(L3,L3)*x9 '
+
+fit.2.3 <- cfa(groupmodel.2.3, 
+           data = HolzingerSwineford1939, 
+           group = "sex")
+summary(fit.2.3, standardized=TRUE, fit.measures=TRUE)
+@
+
+Now we compare the two fits:
+<<>>=
+anova(fit.1,fit.2.3)
+@
+
+Here, we see a difference in fits, such that constraining the means for speed in men and women makes the model fir worse. Thus, men and women do in fact differ in their speeds. 
+
+\subsubsection {Constraining Factor Loadings}
+
+<<>>=
+groupmodel.3 <- ' visual =~ x1 + x2 + x3
+                textual =~ x4 + x5 + x6
+                speed   =~ x7 + x8 + x9 '
+
+fit.3 <- cfa(groupmodel.3, 
+           data = HolzingerSwineford1939, 
+           group = "sex", group.equal = "loadings")
+summary(fit.3, standardized=TRUE, fit.measures=TRUE)
+@
+
+Checking if this constraint reduces fit:
+
+<<>>=
+anova(fit.1, fit.3)
+@
+
+And indeed it does -- this means that men and women do in fact differ on some construct, as constraining the factor loadings to be the same produces a worse fit. 
+
+\subsubsection {Constraining Intercepts}
+
+<<>>=
+groupmodel.4 <- ' visual =~ x1 + x2 + x3
+                textual =~ x4 + x5 + x6
+                speed   =~ x7 + x8 + x9 '
+
+fit.4 <- cfa(groupmodel.4, 
+           data = HolzingerSwineford1939, 
+           group = "sex", group.equal = "intercepts")
+summary(fit.4, standardized=TRUE, fit.measures=TRUE)
+@
+
+Checking if this constraint reduces fit:
+
+<<>>=
+anova(fit.1, fit.4)
+@
+
+Similarly, we see that constraining the intercepts also produces a difference, suggesting that men and women differ on some aspect. 
+
+\subsubsection {Constraining Some Parameters, Not All}
+
+<<>>=
+groupmodel.5 <- ' visual =~ x1 + x2 + x3
+                textual =~ x4 + x5 + x6
+                speed   =~ x7 + x8 + x9 '
+
+fit.5 <- cfa(groupmodel.5, 
+           data = HolzingerSwineford1939, 
+           group = "sex", group.equal = c("loadings", "intercepts"),
+           group.partial = c("visual =~ x1 + x2 + x3", 
+                             "textual =~ x4 + x5 + x6"))
+summary(fit.5, standardized=TRUE, fit.measures=TRUE)
+@
+
+Checking if this constraint reduces fit:
+
+<<>>=
+anova(fit.1, fit.5)
+@
+
+Again, constraining the loadings and intercepts makes the fit worse.
+\end{document}
