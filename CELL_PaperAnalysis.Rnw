@@ -1,0 +1,415 @@
+\documentclass[a4paper]{article}
+\usepackage{Sweave}
+\usepackage{fixltx2e}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\usepackage[margin=1.0in]{geometry}
+
+ \DefineVerbatimEnvironment{Sinput}{Verbatim} { frame = lines, fontshape = sl}
+\DefineVerbatimEnvironment{Soutput}{Verbatim}{frame=lines, fontshape = sl}
+
+\title{Intensive Data Analysis II}
+\author{Abhilasha Kumar}
+<<echo=FALSE>>=
+options(width=60)
+library(xtable)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+library(sjPlot)
+library(lme4)
+library(plyr)
+library(dplyr)
+@
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+ \maketitle
+
+\section {Reading the Data}
+
+<<>>=
+cell_demo = read.csv("cell_demo.csv", header = TRUE, sep = ",")
+cell = read.csv("cell_withitems_complete_new.csv", header = TRUE, sep = ",")
+
+cell = merge(cell, cell_demo, by = "ID")
+cell$ID = as.factor(as.character(cell$ID))
+
+## We need to account for the fact that contacts chosen from the end of
+## the year will have fewer messages since it is the last time they were
+## contacted -- so only messages from that month. We scale the number of messages by the factor of the month to see this effect
+
+cell$ScaledMessages = cell$Messages*cell$Month
+@
+
+\subsection {Adding New Predictors}
+
+\subsubsection*{Within-Person and Grand Mean Centering}
+
+<<>>=
+library(dplyr)
+
+## aggregate per subject all IVs and DVs
+cell_agg = group_by(cell, ID) %>%
+  summarise_at(vars(Accuracy, TimeJudgmentDistance, 
+                    ScaledMessages, Vividness, Sentiment), mean)
+colnames(cell_agg) = c("ID", "acc_mean", "time_mean", 
+                       "messages_mean", "vividness_mean", "sent_mean")
+
+## merge aggregate info with long data
+cell = merge(cell, cell_agg, by = "ID", all.x = T)
+
+## person and grand-mean centered scores using original and aggregate
+library(dplyr)
+cell = cell %>% mutate(acc_pc = Accuracy - acc_mean,
+                 time_pc = TimeJudgmentDistance - time_mean,
+                 messages_pc = ScaledMessages - messages_mean,
+                 vividness_pc = Vividness - vividness_mean,
+                 sent_pc = Sentiment - sent_mean)
+@
+
+\section {Centered Multiple Predictors}
+
+\subsection*{Time and Messages}
+
+<<>>=
+cell$scaledDays = cell$Days/100
+cell$scaled_m_pc = (cell$messages_pc/100)+1
+cell$scaled_m_mean= (cell$messages_mean/10)
+
+library(lme4)
+
+acc_pred_3_1 = glmer(data = cell, Accuracy ~ scaledDays + scaled_m_mean +
+                                scaled_m_pc +
+                     (1|ID) + (1|ItemNo), family = "binomial")
+summary(acc_pred_3_1)
+
+fixed_eff = fixef(acc_pred_3_1)
+
+odds = exp(fixed_eff)
+x = confint(acc_pred_3_1)
+
+exp(x)
+## CONFINT
+
+#  2.5 %     97.5 %
+# .sig01         0.32391683  0.8830534
+# .sig02         0.00000000  0.5902811
+# (Intercept)    0.19894118  1.9030035
+# scaledDays    -0.84330277 -0.4790048
+# scaled_m_mean -0.02834944  0.2772891
+# scaled_m_pc    0.34950065  1.3881071
+
+acc_pred_4 = glmer(data = cell, Accuracy ~ scaledDays + scaled_m_mean +
+                     scaled_m_pc + scaled_m_mean:scaled_m_pc + 
+                     (1|ID) + (1|ItemNo), family = "binomial",
+                    control=glmerControl(optimizer="bobyqa",
+                    optCtrl=list(maxfun=1000000)))
+
+summary(acc_pred_4)
+
+anova(acc_pred_3_1, acc_pred_4)
+@
+
+\section {Graphing the Models}
+
+\subsection*{Naming Accuracy}
+
+The final model for accuracy is acc_pred_4, with time and messagespc and messagesmean. We are going to try and plot the fitted values from this model below:
+<<echo=FALSE, fig=TRUE>>=
+fixed.frame <- cell %>%
+  summarise(mean_pc = mean(scaled_m_pc, na.rm = T), 
+            sd_pc = sd(scaled_m_pc, na.rm = T),
+            mean_grand = mean(scaled_m_mean, na.rm = T),
+            sd_grand = sd(scaled_m_mean, na.rm =T))
+
+fixed.frame <- 
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      scaledDays = seq(0,4,.01), 
+      scaled_m_pc = c(fixed.frame$mean_pc-fixed.frame$sd_pc,
+                     fixed.frame$mean_pc,
+                     fixed.frame$mean_pc+fixed.frame$sd_pc)),
+      scaled_m_mean = fixed.frame$mean_grand ) %>%
+    mutate(pred = predict(acc_pred_4, newdata = ., re.form = NA)) 
+
+fixed.frame$odds = exp(fixed.frame$pred)
+fixed.frame$prob = fixed.frame$odds/(1+fixed.frame$odds)
+
+library(ggplot2)
+library(ggthemes)
+fixed.frame %>%
+  mutate(MessageLevel = factor(scaled_m_pc, levels = unique(scaled_m_pc), 
+                                 labels = c("Low:-1SD", "Mean:0SD", "High:1SD"))) %>%
+  ggplot(aes(x = scaledDays, y = prob, color = MessageLevel)) +
+ # geom_point(size = .02)+
+ #   stat_smooth(se = FALSE) + 
+  scale_x_continuous(labels=c("0" = "Day 0", "1" = "Day 100",
+                 "2" = "Day 200", "3" = "Day 300", "4" = "Day 400"))+
+  geom_line()+
+       theme_few() +
+   labs(x = "Retention Interval in Days", y = "Naming Accuracy") + 
+  ggtitle("Naming Accuracy as a function of \n Retention Interval and Frequency") +
+  theme(axis.text = element_text(face = "bold", size = rel(1)),
+          axis.title = element_text(face = "bold", size = rel(1)),
+          legend.title = element_text(face = "bold", size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1), hjust = .5))
+@
+
+<<>>=
+##creatng a factor term for naming accuracy
+cell$acc_fac = as.factor(as.character(cell$Accuracy))
+
+cell_td = cell %>% filter(GuessedMonth != "-1")
+library(optimx)
+@
+
+
+\section {TimeModel}
+
+<<>>=
+library(lme4)
+library(lmerTest)
+
+time_model_7 = lmer(data = cell_td, TimeJudgmentDistance ~ scaledDays + 
+                       (scaledDays|ID),
+     control = lmerControl(optimizer = "optimx", calc.derivs = FALSE,
+     optCtrl = list(method = "nlminb", starttests = FALSE, kkt = FALSE)))
+summary(time_model_7)
+
+cell_td = cell_td %>% 
+  mutate(DatingErrorType = ifelse(DatingError >0 , "Telescoping", "Time Expansion"))
+
+cell_td$DatingErrorType = as.factor(as.character(cell_td$DatingErrorType))
+
+
+time_model_8 = lmer(data = cell_td, TimeJudgmentDistance ~ 
+                      scaledDays*DatingErrorType + 
+                      (scaledDays|ID) + (1|ItemNo))
+
+anova(time_model_8, time_model_7) ## model with telescoping better
+confint(time_model_8)
+
+time_model_9 = lmer(data = cell_td, TimeJudgmentDistance ~ 
+                      scaledDays*DatingErrorType*Sentiment + 
+                       (scaledDays|ID) + (1|ItemNo))
+summary(time_model_9)
+
+anova(time_model_8, time_model_9)
+
+# > confint(time_model_9)
+# Computing profile confidence intervals ...
+#                                                          2.5 %       97.5 %
+# .sig01                                              0.00000000  0.190317012
+# .sig02                                             -1.00850935  1.000000000
+# .sig03                                              0.08141825  0.250670906
+# .sig04                                              0.00000000          Inf
+# .sigma                                              1.17874882  1.308565534
+# (Intercept)                                         0.66577143  1.191413354
+# scaledDays                                          0.27700430  0.591695270
+# DatingErrorTypeTime Expansion                      -0.88469137 -0.161632813
+# Sentiment                                          -0.02649751  0.013069709
+# scaledDays:DatingErrorTypeTime Expansion           -0.58669259 -0.174282554
+# scaledDays:Sentiment                               -0.00183579  0.022065459
+# DatingErrorTypeTime Expansion:Sentiment             0.01458253  0.074900614
+# scaledDays:DatingErrorTypeTime Expansion:Sentiment -0.04516634 -0.007777518
+
+@
+
+<<>>=
+fixed.frame <- 
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      scaledDays = seq(0,4,.01),
+      DatingErrorType = c( "Telescoping", "Time Expansion"))) %>%
+    mutate(pred = predict(time_model_8, newdata = ., re.form = NA)) 
+
+fixed.frame$odds = exp(fixed.frame$pred)
+fixed.frame$prob = fixed.frame$odds/(1+fixed.frame$odds)
+
+library(ggplot2)
+library(ggthemes)
+cell_td %>%
+  ggplot(aes(x = scaledDays, y = TimeJudgmentDistance, 
+             group = DatingErrorType,
+             color = DatingErrorType)) +
+ # geom_point(size = .02)+
+ #   stat_smooth(se = FALSE) + 
+#  scale_x_continuous(labels=c("0" = "Day 0", "1" = "Day 100",
+ #                "2" = "Day 200", "3" = "Day 300", "4" = "Day 400"))+
+  geom_smooth(method = "lm")+
+       theme_few() +
+  scale_color_wsj()+
+   scale_x_continuous(labels=c("0" = "Day 0", "1" = "Day 100",
+                 "2" = "Day 200", "3" = "Day 300", "4" = "Day 400"))+
+   labs(x = "Retention Interval in Days", 
+        y = "Magnitude of Temporal Dating Error") + 
+  ggtitle("Temporal Dating Error as a function of \n Retention Interval and Type of Error") +
+  theme(axis.text = element_text(face = "bold", size = rel(1)),
+          axis.title = element_text(face = "bold", size = rel(1)),
+          legend.title = element_text(face = "bold", size = rel(1)),
+        strip.text.x = element_text(face = "bold", size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1), hjust = .5))
+@
+
+
+<<>>=
+fixed.frame <- cell_td %>%
+  summarise(mean_sent = mean(Sentiment, na.rm = T), 
+            sd_sent = sd(Sentiment, na.rm = T))
+
+fixed.frame <- 
+  data.frame(
+    expand.grid(
+      # here, you add values for your time variable and predictors
+      scaledDays = seq(0,4,.01),
+      Sentiment = c(fixed.frame$mean_sent-fixed.frame$sd_sent,
+                     fixed.frame$mean_sent,
+                     fixed.frame$mean_sent+fixed.frame$sd_sent),
+      DatingErrorType = c( "Telescoping", "Time Expansion"))) %>%
+    mutate(pred = predict(time_model_9, newdata = ., re.form = NA)) 
+
+library(ggplot2)
+library(ggthemes)
+fixed.frame %>%
+  mutate(`Sentiment Score` = factor(Sentiment, levels = unique(Sentiment), 
+                                 labels = c("Low:-1SD", "Mean:0SD", "High:1SD")))%>%
+  ggplot(aes(x = scaledDays, y = pred, 
+             group = `Sentiment Score`,
+             color = `Sentiment Score`)) +
+ # geom_point(size = .02)+
+ #   stat_smooth(se = FALSE) + 
+#  scale_x_continuous(labels=c("0" = "Day 0", "1" = "Day 100",
+ #                "2" = "Day 200", "3" = "Day 300", "4" = "Day 400"))+
+  geom_smooth(method = "lm")+
+       theme_few() +
+  scale_color_wsj()+
+  facet_wrap(~DatingErrorType) + 
+   scale_x_continuous(labels=c("0" = "Day 0", "1" = "Day 100",
+                 "2" = "Day 200", "3" = "Day 300", "4" = "Day 400"))+
+   labs(x = "Retention Interval in Days", 
+        y = "Magnitude of Temporal Dating Error") + 
+  ggtitle("Temporal Dating Error as a function of \n Retention Interval, Type of Error and Sentiment Score") +
+  theme(axis.text = element_text(face = "bold", size = rel(1)),
+          axis.title = element_text(face = "bold", size = rel(1)),
+                strip.text.x = element_text(face = "bold", size = rel(1.2)),
+          legend.title = element_text(face = "bold", size = rel(1)),
+          plot.title = element_text(face = "bold", size = rel(1.5), hjust = .5))
+@
+
+
+
+
+\section {Descriptive Graphs}
+
+<<>>=
+desc_cell = read.csv("cell_descdata.csv", header = TRUE, sep = ",")
+library(dplyr)
+errors =  group_by(desc_cell, wrongAnswerReason) %>%
+  summarise(n = n())
+
+errors_subject = group_by(desc_cell, uid, wrongAnswerReason) %>%
+  summarise(n = n(), sd = sd(n))
+
+total = sum(errors$n)
+
+errors$percent = errors$n/total
+library(Rmisc)
+errors_plot = summarySE(errors_subject, 
+                      measurevar = "n",
+                      groupvars = c("wrongAnswerReason"))
+
+errors_plot_r = summarySE(errors_subject, 
+                      measurevar = "n")
+
+
+library(ggplot2)
+library(ggthemes)
+errors_plot %>% mutate(ErrorType = factor(wrongAnswerReason, 
+                                      levels = unique(wrongAnswerReason),
+                    labels = c("Correct \n Response", "1: I should have \nremembered \nthe name",
+                               "2: My answer is \n essentially correct", "3: I recognized the\n context, not the name", "4: I have trouble \nremembering this name",  
+                               "5: It was a \nvague sentence")))%>%
+  ggplot(aes(x = ErrorType, y = n)) +  
+  geom_bar(stat = "identity", position = "dodge", width = 0.5, 
+           color = "gray4", fill = "skyblue")+
+   geom_errorbar(aes(ymin = n - sd, ymax = n + sd),
+                width=.05, position=position_dodge(.5)) +
+    theme_few()+
+  xlab("Response Type") + ylab("Mean Number of Trials") + 
+    ggtitle("Mean Occurence of Response Types and Errors") + 
+  theme(axis.text = element_text( face = "bold", size = rel(0.8)),
+          axis.title = element_text(face = "bold", size = rel(1.2)),
+          legend.title = element_text(face = "bold", size = rel(1.2)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+
+@
+
+\section {Retrieval States}
+
+<<>>=
+library(dplyr)
+cell_state = group_by(cell, ID, Month, RecallBeforeHint) %>%
+  summarise(Count = n())
+
+cell_state_rmisc = Rmisc::summarySE(cell_state,
+                                    measurevar = "Count",
+                                    groupvars = c("Month", "RecallBeforeHint"))
+
+cell_state = cell_state %>% arrange(ID, RecallBeforeHint)
+
+cell_state$RecallBeforeHint = as.factor(cell_state$RecallBeforeHint)
+
+cell_state$State = ifelse(cell_state$RecallBeforeHint == "1", "1: The name was easy to recall", ifelse(cell_state$RecallBeforeHint == "3","3: The name is at the tip of my tongue", ifelse(cell_state$RecallBeforeHint == "2", "2: I got the name after a while", ifelse(cell_state$RecallBeforeHint == "4", "4: I know the person, not the name", ifelse(cell_state$RecallBeforeHint == "5", "5:I don't know", "0")))))
+library(ggplot2)
+library(ggthemes)
+state_plot = cell_state %>% 
+  ggplot(aes(x = Month, y = Count, 
+             group  = State, 
+                             color = State)) +  
+  geom_smooth(method = "lm" )+
+  #geom_bar(stat = "identity", position = "dodge", width = 0.5)+
+  # geom_errorbar(aes(ymin = Count - sd, ymax = Count + sd),
+   #             width=.05, position=position_dodge(.5)) +
+    theme_few()+
+  scale_color_gdocs()+
+  xlab("Retention Interval (Months)") + ylab("Mean Number of Trials") + 
+    ggtitle("Mean Occurence of Retrieval States") + 
+  theme(axis.text = element_text( face = "bold", size = rel(0.8)),
+          axis.title = element_text(face = "bold", size = rel(1.2)),
+          legend.title = element_text(face = "bold", size = rel(1.2)),
+          plot.title = element_text(face = "bold", size = rel(1.2), hjust = .5))
+
+
+state_plot 
+
+library(nnet)
+library(dplyr)
+
+cell$state = as.factor(cell$RecallBeforeHint)
+cell_state_model = nnet::multinom(data = cell, 
+                         state ~ Month)
+summary(cell_state_model)
+car::Anova(cell_state_model)
+
+
+plot_data <- effects::effect("Month", 
+                                    cell_state_model,
+ xlevels = list(Month = 1:12))
+ plot(plot_data)
+
+@
+
+
+
+\end{document}
